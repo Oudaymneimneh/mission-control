@@ -182,10 +182,15 @@ export function TrustNetworkGraph({ trustData }: TrustNetworkGraphProps) {
   const dragRef = useRef<{ nodeIndex: number; offsetX: number; offsetY: number } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const iterRef = useRef(0)
+  const prevDataRef = useRef<string>('')
 
   // Build graph when trust data changes
   useEffect(() => {
     if (!trustData || trustData.length === 0) return
+
+    const dataKey = JSON.stringify(trustData)
+    if (dataKey === prevDataRef.current) return
+    prevDataRef.current = dataKey
 
     const graph = buildGraph(trustData)
     nodesRef.current = graph.nodes
@@ -274,7 +279,11 @@ export function TrustNetworkGraph({ trustData }: TrustNetworkGraphProps) {
   }, [])
 
   if (!trustData || trustData.length === 0) {
-    return null
+    return (
+      <div className="flex items-center justify-center h-48 text-slate-500 text-sm">
+        No trust data yet — agents build trust through meetings
+      </div>
+    )
   }
 
   return (

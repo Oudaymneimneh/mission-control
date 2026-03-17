@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
       // 2. Social compatibility — Big Five similarity
       let compatibility = 0.5
       if (initPersonality && candPersonality) {
-        const traits = ['extraversion', 'agreeableness', 'openness', 'conscientiousness'] as const
+        const traits = ['extraversion', 'agreeableness', 'openness', 'conscientiousness', 'neuroticism'] as const
         let totalDiff = 0
         for (const trait of traits) {
           totalDiff += Math.abs(initPersonality[trait] - candPersonality[trait])

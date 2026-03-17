@@ -10,6 +10,8 @@ import { useMissionControl, Agent } from '@/store'
 import { buildOfficeLayout } from '@/lib/office-layout'
 import { getInitials, getAgentColor } from '@/lib/format-utils'
 import { MeetingPanel } from '@/components/panels/meeting-panel'
+import type { ActiveMeeting } from '@/lib/meeting-sse-reducers'
+import { reduceMeetingStarted, reduceMeetingMessage, reduceMeetingConcluded } from '@/lib/meeting-sse-reducers'
 
 type ViewMode = 'office' | 'org-chart'
 type OrgSegmentMode = 'category' | 'role' | 'status'
@@ -452,28 +454,18 @@ export function OfficePanel() {
   const movingTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
 
   // Meeting state
-  const [activeMeetings, setActiveMeetings] = useState<Array<{
-    meeting_id: number
-    initiator_id: number
-    participant_id: number
-    initiator_name: string
-    participant_name: string
-    location_x: number
-    location_y: number
-    status: 'walking' | 'conversing'
-    turn_count: number
-    max_turns: number
-  }>>([])
+  const [activeMeetings, setActiveMeetings] = useState<ActiveMeeting[]>([])
   const [meetingSpeechBubbles, setMeetingSpeechBubbles] = useState<Map<number, { agentName: string; content: string; timestamp: number }>>(new Map())
   const [dismissingBubbles, setDismissingBubbles] = useState<Set<number>>(new Set())
   const [hoveredAgentId, setHoveredAgentId] = useState<number | null>(null)
   const meetingBubbleTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+  const dismissTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map())
   const activeMeetingsRef = useRef(activeMeetings)
   activeMeetingsRef.current = activeMeetings
 
   const dismissBubble = useCallback((agentId: number) => {
     setDismissingBubbles((prev) => new Set(prev).add(agentId))
-    setTimeout(() => {
+    const handle = setTimeout(() => {
       setMeetingSpeechBubbles((current) => {
         const next = new Map(current)
         next.delete(agentId)
@@ -484,7 +476,9 @@ export function OfficePanel() {
         next.delete(agentId)
         return next
       })
+      dismissTimersRef.current.delete(agentId)
     }, 300)
+    dismissTimersRef.current.set(agentId, handle)
   }, [])
 
   const fetchAgents = useCallback(async () => {
@@ -1122,21 +1116,7 @@ export function OfficePanel() {
         const data = JSON.parse(event.data)
         if (data.type === 'meeting.started') {
           const m = data.data
-          setActiveMeetings((current) => [
-            ...current.filter((x) => x.meeting_id !== m.meeting_id),
-            {
-              meeting_id: m.meeting_id,
-              initiator_id: m.initiator_id,
-              participant_id: m.participant_id,
-              initiator_name: m.initiator_name,
-              participant_name: m.participant_name,
-              location_x: m.location_x,
-              location_y: m.location_y,
-              status: 'walking' as const,
-              turn_count: 0,
-              max_turns: m.max_turns ?? 6,
-            },
-          ])
+          setActiveMeetings((current) => reduceMeetingStarted(current, m))
           pushOfficeEvent({
             kind: 'action',
             severity: 'good',
@@ -1145,13 +1125,7 @@ export function OfficePanel() {
         } else if (data.type === 'meeting.message') {
           const m = data.data
           // Update active meeting status/turn_count
-          setActiveMeetings((current) =>
-            current.map((mtg) =>
-              mtg.meeting_id === m.meeting_id
-                ? { ...mtg, status: 'conversing' as const, turn_count: m.turn_number }
-                : mtg
-            )
-          )
+          setActiveMeetings((current) => reduceMeetingMessage(current, m))
           setMeetingSpeechBubbles((current) => {
             const next = new Map(current)
             next.set(m.agent_id, { agentName: m.agent_name, content: m.content, timestamp: Date.now() })
@@ -1167,7 +1141,7 @@ export function OfficePanel() {
           meetingBubbleTimersRef.current.set(m.agent_id, timer)
         } else if (data.type === 'meeting.concluded') {
           const m = data.data
-          setActiveMeetings((current) => current.filter((x) => x.meeting_id !== m.meeting_id))
+          setActiveMeetings((current) => reduceMeetingConcluded(current, m))
           // Clear speech bubbles for both agents with exit animation
           for (const agentId of [m.initiator_id, m.participant_id]) {
             const timer = meetingBubbleTimersRef.current.get(agentId)
@@ -1217,6 +1191,8 @@ export function OfficePanel() {
       if (eventSource) eventSource.close()
       for (const timer of meetingBubbleTimersRef.current.values()) clearTimeout(timer)
       meetingBubbleTimersRef.current.clear()
+      dismissTimersRef.current.forEach(clearTimeout)
+      dismissTimersRef.current.clear()
     }
   }, [enqueueMovement, pushOfficeEvent, dismissBubble])
 
@@ -1289,6 +1265,8 @@ export function OfficePanel() {
       }
       for (const timer of meetingBubbleTimersRef.current.values()) clearTimeout(timer)
       meetingBubbleTimersRef.current.clear()
+      dismissTimersRef.current.forEach(clearTimeout)
+      dismissTimersRef.current.clear()
     }
   }, [])
 
@@ -1972,7 +1950,7 @@ export function OfficePanel() {
                   onMouseEnter={() => setHoveredAgentId(agent.id)}
                   onMouseLeave={() => setHoveredAgentId(null)}
                   style={{
-                    opacity: meetingAgentIds.has(agent.id) || agent.status === 'busy' ? 1 : 0.45,
+                    opacity: meetingAgentIds.has(agent.id) || agent.status === 'busy' || agent.status === 'error' ? 1 : 0.45,
                     transition: 'opacity 300ms ease',
                   }}
                 >
@@ -2028,7 +2006,7 @@ export function OfficePanel() {
                     className="absolute -translate-x-1/2 -translate-y-1/2 hover:scale-110 h-auto p-0 rounded-none hover:bg-transparent"
                     style={{ left: `${x}%`, top: `${y}%`, transition: `${moveTx}, transform 500ms ease` }}
                   >
-                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 border text-white text-[11px] px-2 py-0.5 shadow-[0_0_12px_rgba(0,0,0,0.4)]" style={{ borderColor: `hsl(${getAgentColor(agent.id).hue}, 70%, 55%, 0.5)` }}>
+                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 border text-white text-[11px] px-2 py-0.5 shadow-[0_0_12px_rgba(0,0,0,0.4)]" style={{ borderColor: `hsla(${getAgentColor(agent.id).hue}, 70%, 55%, 0.5)` }}>
                       <span className={`inline-block w-2 h-2 rounded-full ${statusDot[agent.status]} mr-1`} />
                       {agent.name}
                       {meetingAgentIds.has(agent.id) && <span className="ml-1 text-[9px] text-void-cyan">{t('meetingBadge')}</span>}
@@ -2115,7 +2093,7 @@ export function OfficePanel() {
                       className={`absolute -translate-x-1/2 pointer-events-none z-40 ${dismissingBubbles.has(agent.id) ? 'opacity-0 -translate-y-2' : 'animate-in fade-in slide-in-from-bottom-2 duration-300'}`}
                       style={{ left: `${x}%`, top: `calc(${y}% - 80px)`, transition: dismissingBubbles.has(agent.id) ? `opacity 300ms ease, transform 300ms ease, ${moveTx}` : moveTx }}
                     >
-                      <div className="max-w-[180px] rounded-lg bg-slate-900/95 border px-2.5 py-1.5 text-[10px] text-slate-100 leading-tight" style={{ borderColor: getAgentColor(agent.id).border, boxShadow: `0 0 16px hsl(${getAgentColor(agent.id).hue}, 70%, 45%, 0.15)` }}>
+                      <div className="max-w-[180px] rounded-lg bg-slate-900/95 border px-2.5 py-1.5 text-[10px] text-slate-100 leading-tight" style={{ borderColor: getAgentColor(agent.id).border, boxShadow: `0 0 16px hsla(${getAgentColor(agent.id).hue}, 70%, 45%, 0.15)` }}>
                         <div className="font-medium text-[9px] mb-0.5" style={{ color: getAgentColor(agent.id).accent }}>{meetingSpeechBubbles.get(agent.id)!.agentName}</div>
                         <div>{String(meetingSpeechBubbles.get(agent.id)!.content).slice(0, 120)}{String(meetingSpeechBubbles.get(agent.id)!.content).length > 120 ? '...' : ''}</div>
                       </div>
@@ -2275,7 +2253,7 @@ export function OfficePanel() {
           </div>
 
           <div
-            className="transition-all duration-400"
+            className="transition-[transform,opacity]"
             style={{
               transform: showMeetingPanel ? 'translateX(0)' : 'translateX(100%)',
               opacity: showMeetingPanel ? 1 : 0,

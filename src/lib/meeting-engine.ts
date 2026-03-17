@@ -38,6 +38,7 @@ export interface MeetingRow {
   recurring_interval_ms: number | null
   started_at: number | null
   concluded_at: number | null
+  quality_score: string | null
   created_at: number
 }
 
@@ -312,8 +313,12 @@ export function createMeeting(
   // Higher conscientiousness = longer meetings (4-8 turns)
   const maxTurns = Math.round(4 + avgConscient * 4)
 
-  // All DB writes in a single transaction
-  const { meeting, locX, locY } = writeTransaction(db, (tx) => {
+  // All DB writes in a single transaction (busy-agent check is atomic inside tx)
+  const result = writeTransaction(db, (tx) => {
+    // Atomic busy-agent check inside transaction to prevent race condition
+    const agent = tx.prepare('SELECT status FROM agents WHERE id = ?').get(initiator.id) as { status: string } | undefined
+    if (agent && agent.status === 'busy') return { created: false as const, reason: 'busy' }
+
     const initPos = tx.prepare(
       'SELECT x, y FROM agent_office_positions WHERE agent_id = ?'
     ).get(initiator.id) as { x: number; y: number } | undefined
@@ -346,8 +351,14 @@ export function createMeeting(
     ).run(lx, ly, participant.id)
 
     const m = tx.prepare('SELECT * FROM agent_meetings WHERE id = ?').get(meetingId) as MeetingRow
-    return { meeting: m, locX: lx, locY: ly }
+    return { created: true as const, meeting: m, locX: lx, locY: ly }
   })
+
+  if (!result.created) {
+    throw new Error(`Cannot create meeting: ${result.reason}`)
+  }
+
+  const { meeting, locX, locY } = result
 
   // Broadcasts AFTER transaction commits
   eventBus.broadcast('office.position.updated', {
@@ -389,6 +400,13 @@ export function createScheduledMeeting(
   scheduledFor?: number,
   recurringIntervalMs?: number,
 ): MeetingRow {
+  if (recurringIntervalMs !== null && recurringIntervalMs !== undefined) {
+    if (typeof recurringIntervalMs !== 'number' || recurringIntervalMs < 60000) {
+      logger.warn({ recurringIntervalMs }, 'Invalid recurring_interval_ms, ignoring')
+      recurringIntervalMs = null as unknown as undefined
+    }
+  }
+
   const initiator = db.prepare(
     'SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE id = ?'
   ).get(initiatorId) as AgentForMeeting | undefined
@@ -730,7 +748,7 @@ export async function summarizeMeeting(
     await observe(meeting.participant_id, `Had a meeting: ${summary.slice(0, 150)}`, meeting.workspace_id)
   } catch { /* memory not available */ }
 
-  // Phase 4b: Extract action items (async, non-critical, only for 3+ turn meetings)
+  // Phase 4b: Extract action items (async, non-critical)
   if (messages.length >= 3) {
     try {
       const { extractMeetingActions } = await import('@/lib/meeting-actions')
@@ -752,7 +770,9 @@ export async function summarizeMeeting(
               INSERT INTO tasks (title, description, assigned_to, status, priority, source_type, source_id, workspace_id, created_at, updated_at)
               VALUES (?, ?, ?, 'inbox', 'medium', 'meeting', ?, ?, unixepoch(), unixepoch())
             `).run(action.title, action.description, action.assignee_name, meeting.id, meeting.workspace_id)
-          } catch { /* task creation is best-effort */ }
+          } catch (err) {
+            logger.warn({ meetingId: meeting.id, error: String(err) }, 'Failed to create task from meeting action')
+          }
         }
 
         eventBus.broadcast('meeting.actions_created', {
@@ -763,6 +783,17 @@ export async function summarizeMeeting(
       }
     } catch (err) {
       logger.warn({ err, meetingId: meeting.id }, 'Action extraction failed')
+    }
+  } else if (messages.length > 0) {
+    // Short meetings (< 3 messages): create a simple follow-up task
+    try {
+      const taskTitle = meeting.topic || messages[0].content.slice(0, 100)
+      db.prepare(`
+        INSERT INTO tasks (title, description, assigned_to, status, priority, source_type, source_id, workspace_id, created_at, updated_at)
+        VALUES (?, ?, ?, 'inbox', 'low', 'meeting', ?, ?, unixepoch(), unixepoch())
+      `).run(taskTitle, summary, initiator.name, meeting.id, meeting.workspace_id)
+    } catch (err) {
+      logger.warn({ meetingId: meeting.id, error: String(err) }, 'Failed to create task from short meeting')
     }
   }
 
@@ -836,6 +867,13 @@ export async function processActiveMeeting(agent: AgentForMeeting): Promise<bool
   `).get(agent.workspace_id, agent.id, agent.id) as MeetingRow | undefined
 
   if (!meeting) return false
+
+  // Guard: if either participant FK is null (after future SET NULL migration), cancel gracefully
+  if (!meeting.initiator_id || !meeting.participant_id) {
+    db.prepare("UPDATE agent_meetings SET status = 'concluded', summary = 'Meeting cancelled (participant removed)', concluded_at = unixepoch() WHERE id = ?").run(meeting.id)
+    eventBus.broadcast('meeting.concluded', { meeting_id: meeting.id, workspace_id: meeting.workspace_id, initiator_id: meeting.initiator_id, participant_id: meeting.participant_id, summary: 'Meeting cancelled (participant removed)' })
+    return false
+  }
 
   const now = Math.floor(Date.now() / 1000)
 

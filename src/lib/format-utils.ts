@@ -37,7 +37,7 @@ export interface AgentColorPalette {
 }
 
 export function getAgentColor(agentId: number): AgentColorPalette {
-  const hue = Math.round((agentId * 137.508) % 360)
+  const hue = Math.round(((agentId * 137.508) % 360 + 360) % 360)
   return {
     hue,
     bg: `hsl(${hue}, 70%, 45%)`,

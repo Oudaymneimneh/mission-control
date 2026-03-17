@@ -86,6 +86,12 @@ export async function GET(request: NextRequest) {
       trust_delta: trustDeltaMap.get(agent.agent_id) ?? 0,
     }))
 
+    // Lifetime concluded count (not windowed)
+    const totalRow = db.prepare(
+      'SELECT COUNT(*) as cnt FROM agent_meetings WHERE workspace_id = ? AND status = ?'
+    ).get(workspaceId, 'concluded') as { cnt: number }
+    const total_concluded = totalRow.cnt
+
     // Average quality scores (last 50 concluded meetings with scores)
     const qualityRows = db.prepare(`
       SELECT quality_score FROM agent_meetings
@@ -111,7 +117,7 @@ export async function GET(request: NextRequest) {
         trust_network: trustNetwork,
         meetings_per_agent: meetingsPerAgentEnriched,
         avg_quality: avgQuality,
-        total_concluded: meetingsPerDay.reduce((s, d) => s + d.count, 0),
+        total_concluded,
       },
     })
   } catch {

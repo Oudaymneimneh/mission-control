@@ -178,4 +178,48 @@ test.describe('Meetings API', () => {
     // May be 200, 400 (if agent doesn't exist), or 401
     expect([200, 400, 401, 404]).toContain(res.status())
   })
+
+  // ── Canvas Marker Positions (MTST-08) ─────────────────
+
+  test('GET /api/office/positions returns position data for canvas markers', async ({ request }) => {
+    const res = await request.get('/api/office/positions', { headers: API_KEY_HEADER })
+    expect([200, 401]).toContain(res.status())
+    if (res.status() === 200) {
+      const body = await res.json()
+      expect(body).toHaveProperty('data')
+      expect(Array.isArray(body.data)).toBe(true)
+      for (const pos of body.data) {
+        expect(typeof pos.agent_id).toBe('number')
+        expect(typeof pos.x).toBe('number')
+        expect(typeof pos.y).toBe('number')
+      }
+    }
+  })
+
+  test('GET /api/office/positions/999999 returns 404 for nonexistent agent', async ({ request }) => {
+    const res = await request.get('/api/office/positions/999999', { headers: API_KEY_HEADER })
+    expect([404, 401]).toContain(res.status())
+  })
+
+  test('GET /api/office/positions/abc returns 400 for non-numeric ID', async ({ request }) => {
+    const res = await request.get('/api/office/positions/abc', { headers: API_KEY_HEADER })
+    expect([400, 401]).toContain(res.status())
+  })
+
+  test('POST /api/office/positions/1 rejects missing target coordinates', async ({ request }) => {
+    const res = await request.post('/api/office/positions/1', {
+      headers: API_KEY_HEADER,
+      data: {},
+    })
+    expect([400, 401]).toContain(res.status())
+  })
+
+  test('POST /api/office/positions/1 accepts valid target coordinates', async ({ request }) => {
+    const res = await request.post('/api/office/positions/1', {
+      headers: API_KEY_HEADER,
+      data: { target_x: 150, target_y: 250 },
+    })
+    // 200 if agent exists, 401 if auth issue, 500 if agent missing from DB
+    expect([200, 401, 500]).toContain(res.status())
+  })
 })

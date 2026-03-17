@@ -103,6 +103,7 @@ function makeMeeting(overrides: Partial<MeetingRow> = {}): MeetingRow {
     scheduled_for: null,
     recurring_interval_ms: null,
     created_at: Math.floor(Date.now() / 1000),
+    quality_score: null,
     ...overrides,
   }
 }
@@ -337,6 +338,54 @@ describe('meeting integration — quality scoring', () => {
     const storedJson = JSON.parse(qualityRunMock.mock.calls[0][0] as string)
     expect(storedJson).toEqual({ coherence: 4, actionability: 3, role_adherence: 5 })
     expect(qualityRunMock.mock.calls[0][1]).toBe(100) // meeting id
+  })
+
+  it('malformed quality JSON falls back to neutral scores', async () => {
+    // First call: summary LLM response
+    vi.mocked(complete).mockResolvedValueOnce(RECORDED.summary)
+    // Second call: quality evaluation returns malformed JSON (strings instead of numbers)
+    vi.mocked(complete).mockResolvedValueOnce({
+      text: '{"coherence": "high", "actionability": "medium", "role_adherence": "excellent"}',
+      tokenCount: { input: 500, output: 15 },
+      cost: 0.001,
+      latencyMs: 400,
+      model: 'test',
+    })
+
+    const messages = [
+      { content: RECORDED.turn1.text, agent_name: 'Atlas' },
+      { content: RECORDED.turn2.text, agent_name: 'Nova' },
+      { content: RECORDED.turn3.text, agent_name: 'Atlas' },
+      { content: RECORDED.turn4.text, agent_name: 'Nova' },
+    ]
+
+    const qualityRunMock = vi.fn()
+    const statusCalls: Array<any[]> = []
+    const statusRunMock = vi.fn((...args: any[]) => { statusCalls.push(args) })
+
+    const db = createMockDb()
+    db._when('UPDATE agent_meetings SET status', { run: statusRunMock })
+    db._when('SELECT mm.content', { all: vi.fn().mockReturnValue(messages) })
+    db._when('FROM agents WHERE id', {
+      get: vi.fn().mockReturnValue(speaker),
+    })
+    db._when('UPDATE agent_office_positions SET target_x = NULL', { run: vi.fn() })
+    db._when('UPDATE agent_meetings SET quality_score', { run: qualityRunMock })
+    db._when('SELECT name FROM agents', { get: vi.fn().mockReturnValue({ name: 'Nova' }) })
+
+    const meeting = makeMeeting({ turn_count: 4, max_turns: 4, topic: 'API design' })
+    await summarizeMeeting(db as any, meeting)
+
+    // Meeting still concludes successfully
+    expect(statusRunMock).toHaveBeenCalledTimes(2)
+    expect(statusCalls[1][0]).toBe(RECORDED.summary.text)
+    expect(statusCalls[1][1]).toBe(100)
+
+    // Quality score stored with neutral fallback (clampScore converts NaN → 3)
+    expect(qualityRunMock).toHaveBeenCalledTimes(1)
+    const storedJson = JSON.parse(qualityRunMock.mock.calls[0][0] as string)
+    expect(storedJson).toEqual({ coherence: 3, actionability: 3, role_adherence: 3 })
+    expect(qualityRunMock.mock.calls[0][1]).toBe(100)
   })
 
   it('action extraction skipped for meetings with fewer than 3 turns', async () => {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { getInitials, hashColor } from '@/lib/format-utils'
 import { MeetingAnalyticsPanel } from '@/components/panels/meeting-analytics-panel'
 import { CollaboratorSuggestionsPanel } from '@/components/panels/collaborator-suggestions-panel'
+import { useMissionControl } from '@/store'
 
 interface ActiveMeeting {
   meeting_id: number
@@ -55,6 +56,8 @@ export interface MeetingPanelProps {
 
 export function MeetingPanel({ activeMeetings, speechBubbles }: MeetingPanelProps) {
   const t = useTranslations('office')
+  const { currentUser } = useMissionControl()
+  const workspaceId = currentUser?.workspace_id ?? 1
 
   function relativeTime(epochSec: number): string {
     const diff = Math.floor(Date.now() / 1000) - epochSec
@@ -396,6 +399,22 @@ export function MeetingPanel({ activeMeetings, speechBubbles }: MeetingPanelProp
                               <div className="text-[10px] text-slate-300">{meeting.summary}</div>
                             </div>
                           )}
+                          {meeting.quality_score && (() => {
+                            try {
+                              const q = JSON.parse(meeting.quality_score)
+                              const avg = ((q.coherence + q.actionability + q.role_adherence) / 3)
+                              return (
+                                <div className="border-t border-border/30 pt-1.5 mt-1.5">
+                                  <div className="text-[9px] font-mono uppercase tracking-wider text-void-cyan/60 mb-1">{t('analyticsScore', { score: avg.toFixed(1) })}</div>
+                                  <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
+                                    <span>Coherence: {q.coherence}/5</span>
+                                    <span>Actionability: {q.actionability}/5</span>
+                                    <span>Role: {q.role_adherence}/5</span>
+                                  </div>
+                                </div>
+                              )
+                            } catch { return null }
+                          })()}
                         </div>
                       )}
                     </button>
@@ -432,7 +451,7 @@ export function MeetingPanel({ activeMeetings, speechBubbles }: MeetingPanelProp
           {suggestionsAgentId !== null && (
             <CollaboratorSuggestionsPanel
               agentId={suggestionsAgentId}
-              workspaceId={1}
+              workspaceId={workspaceId}
               refreshTrigger={suggestionsRefreshTrigger}
             />
           )}

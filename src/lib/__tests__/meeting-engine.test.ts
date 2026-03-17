@@ -46,6 +46,7 @@ import {
   summarizeMeeting,
   processActiveMeeting,
   attemptMeetingInitiation,
+  createScheduledMeeting,
   cancelMeeting,
   cancelAgentMeetings,
   getActiveMeetings,
@@ -181,6 +182,7 @@ describe('meeting-engine', () => {
   describe('canInitiateMeeting', () => {
     it('returns true when no cooldown and no active meetings', () => {
       const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
       // cooldown check: "concluded_at FROM agent_meetings ... ORDER BY concluded_at"
       db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue(undefined) })
       // active meeting check: "SELECT id FROM agent_meetings ... status IN"
@@ -193,6 +195,7 @@ describe('meeting-engine', () => {
 
     it('returns false when agent is in cooldown', () => {
       const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
       const recentTime = Math.floor(Date.now() / 1000) - 10 // 10 seconds ago
       db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue({ concluded_at: recentTime }) })
 
@@ -201,6 +204,7 @@ describe('meeting-engine', () => {
 
     it('returns false when agent is already in active meeting', () => {
       const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
       db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue(undefined) })
       db._when('SELECT id FROM agent_meetings', { get: vi.fn().mockReturnValue({ id: 99 }) })
 
@@ -209,6 +213,7 @@ describe('meeting-engine', () => {
 
     it('returns false when max concurrent meetings reached', () => {
       const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
       db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue(undefined) })
       db._when('SELECT id FROM agent_meetings', { get: vi.fn().mockReturnValue(undefined) })
       db._when('SELECT COUNT(*) as cnt FROM agent_meetings', { get: vi.fn().mockReturnValue({ cnt: 5 }) })
@@ -320,7 +325,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: null, summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       // Speaker query
@@ -352,10 +357,41 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
+      expect(result).toBe(false)
+    })
+
+    it('returns false on the last turn (boundary: turnNumber equals max_turns)', async () => {
+      // turn_count=5 means turnNumber=6, and 6 < 6 is false
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'test', summary: null,
+        location_x: 40, location_y: 50, turn_count: 5, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+      }
+
+      // turn_count=5 is odd → participant speaks (id=2)
+      db._when('agents WHERE id', {
+        get: vi.fn()
+          .mockReturnValueOnce(agentB)   // speaker (participant, odd turn)
+          .mockReturnValueOnce(agentA),  // listener (initiator)
+      })
+      db._when('meeting_messages mm', { all: vi.fn().mockReturnValue([
+        { content: 'Hello', turn_number: 1, agent_name: 'Atlas' },
+        { content: 'Hi', turn_number: 2, agent_name: 'Nova' },
+        { content: 'So...', turn_number: 3, agent_name: 'Atlas' },
+        { content: 'Yes', turn_number: 4, agent_name: 'Nova' },
+        { content: 'Good', turn_number: 5, agent_name: 'Atlas' },
+      ]) })
+      db._when('INSERT INTO meeting_messages', { run: vi.fn() })
+      db._when('UPDATE agent_meetings SET turn_count', { run: vi.fn() })
+
+      const result = await generateMeetingTurn(db as any, meeting)
+      // turnNumber = 5 + 1 = 6, and 6 < 6 is false → should return false
       expect(result).toBe(false)
     })
   })
@@ -609,6 +645,92 @@ describe('meeting-engine', () => {
     })
   })
 
+  describe('createScheduledMeeting', () => {
+    it('creates a scheduled meeting with valid parameters', () => {
+      const db = createMockDb()
+      // Agent lookups
+      db._when('agents WHERE id', {
+        get: vi.fn()
+          .mockReturnValueOnce(agentA)   // initiator
+          .mockReturnValueOnce(agentB),  // participant
+      })
+      // Scheduled meeting count check (< 5)
+      db._when("status = 'scheduled'", { get: vi.fn().mockReturnValue({ cnt: 2 }) })
+      // INSERT into agent_meetings
+      db._when('INSERT INTO agent_meetings', { run: vi.fn().mockReturnValue({ lastInsertRowid: 10 }) })
+      // Read back the created meeting
+      db._when('SELECT * FROM agent_meetings WHERE id', {
+        get: vi.fn().mockReturnValue({
+          id: 10, workspace_id: 1, initiator_id: 1, participant_id: 2,
+          status: 'scheduled', topic: 'Sync up', summary: null,
+          location_x: null, location_y: null, turn_count: 0, max_turns: 6,
+          scheduled_for: 1000, recurring_interval_ms: null,
+          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+        }),
+      })
+
+      const meeting = createScheduledMeeting(db as any, 1, 2, 1, 'Sync up', 1000)
+      expect(meeting.id).toBe(10)
+      expect(meeting.status).toBe('scheduled')
+      expect(eventBus.broadcast).toHaveBeenCalledWith('meeting.scheduled', expect.objectContaining({
+        meeting_id: 10,
+        initiator_id: 1,
+        participant_id: 2,
+        topic: 'Sync up',
+      }))
+    })
+
+    it('rejects when 5 meetings already scheduled', () => {
+      const db = createMockDb()
+      // Agent lookups
+      db._when('agents WHERE id', {
+        get: vi.fn()
+          .mockReturnValueOnce(agentA)
+          .mockReturnValueOnce(agentB),
+      })
+      // Scheduled meeting count at limit
+      db._when("status = 'scheduled'", { get: vi.fn().mockReturnValue({ cnt: 5 }) })
+
+      expect(() => createScheduledMeeting(db as any, 1, 2, 1, 'Topic')).toThrow('Maximum scheduled meetings reached')
+    })
+
+    it('validates recurring_interval_ms minimum', () => {
+      const db = createMockDb()
+      // Agent lookups
+      db._when('agents WHERE id', {
+        get: vi.fn()
+          .mockReturnValueOnce(agentA)
+          .mockReturnValueOnce(agentB),
+      })
+      // Scheduled count under limit
+      db._when("status = 'scheduled'", { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      // INSERT
+      const runMock = vi.fn().mockReturnValue({ lastInsertRowid: 11 })
+      db._when('INSERT INTO agent_meetings', { run: runMock })
+      // Read back
+      db._when('SELECT * FROM agent_meetings WHERE id', {
+        get: vi.fn().mockReturnValue({
+          id: 11, workspace_id: 1, initiator_id: 1, participant_id: 2,
+          status: 'scheduled', topic: null, summary: null,
+          location_x: null, location_y: null, turn_count: 0, max_turns: 6,
+          scheduled_for: null, recurring_interval_ms: null,
+          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+        }),
+      })
+
+      // Pass recurringIntervalMs = 1000 (below 60000 minimum)
+      createScheduledMeeting(db as any, 1, 2, 1, undefined, undefined, 1000)
+
+      // The INSERT should have been called with null for recurring_interval_ms
+      // (1000 < 60000 triggers nullification)
+      expect(runMock).toHaveBeenCalled()
+      const insertArgs = runMock.mock.calls[0]
+      // Arguments: workspaceId, initiatorId, participantId, topic, scheduledFor, recurringIntervalMs, now
+      // recurringIntervalMs is the 6th positional arg (index 5)
+      expect(insertArgs[5]).toBeNull()
+    })
+  })
+
   describe('summarizeMeeting', () => {
     it('summarizes meeting with LLM and updates trust', async () => {
       const db = createMockDb()
@@ -616,7 +738,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       // Phase 1 tx: transition to summarizing + read messages + initiator
@@ -646,7 +768,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       // Phase 1 tx: transition to summarizing + empty messages
@@ -669,7 +791,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 4, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -701,7 +823,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -729,7 +851,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -749,6 +871,59 @@ describe('meeting-engine', () => {
       await expect(summarizeMeeting(db as any, meeting)).resolves.toBeUndefined()
 
       // broadcast still happens
+      expect(eventBus.broadcast).toHaveBeenCalledWith('meeting.concluded', expect.objectContaining({
+        meeting_id: 1,
+      }))
+    })
+
+    it('schedules follow-up when recurring_interval_ms is set', async () => {
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'Weekly sync', summary: null,
+        location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: 3600000, created_at: 100, quality_score: null,
+      }
+
+      // Phase 1 tx: transition to summarizing + read messages + initiator
+      db._when("SET status = ?", { run: vi.fn() })
+      db._when('meeting_messages mm', {
+        all: vi.fn().mockReturnValue([
+          { content: 'Hello', agent_name: 'Atlas' },
+          { content: 'Hi there', agent_name: 'Nova' },
+        ]),
+      })
+      db._when('agents WHERE id', { get: vi.fn().mockReturnValue(agentA) })
+      // Phase 3 tx: conclude
+      db._when("status = 'concluded'", { run: vi.fn() })
+      db._when('agent_pairwise_trust', { run: vi.fn(), get: vi.fn().mockReturnValue({ trust_score: 0.5, interaction_count: 0, last_interaction_at: null }) })
+      db._when('SET target_x = NULL', { run: vi.fn() })
+
+      // createScheduledMeeting stubs (called in Phase 4d)
+      // Agent lookups for createScheduledMeeting
+      db._when("status = 'scheduled'", { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      db._when('INSERT INTO agent_meetings', { run: vi.fn().mockReturnValue({ lastInsertRowid: 20 }) })
+      db._when('SELECT * FROM agent_meetings WHERE id', {
+        get: vi.fn().mockReturnValue({
+          id: 20, workspace_id: 1, initiator_id: 1, participant_id: 2,
+          status: 'scheduled', topic: 'Weekly sync', summary: null,
+          location_x: null, location_y: null, turn_count: 0, max_turns: 6,
+          scheduled_for: Math.floor((Date.now() + 3600000) / 1000), recurring_interval_ms: 3600000,
+          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+        }),
+      })
+
+      await summarizeMeeting(db as any, meeting)
+
+      // Verify meeting.scheduled broadcast was called (from createScheduledMeeting)
+      expect(eventBus.broadcast).toHaveBeenCalledWith('meeting.scheduled', expect.objectContaining({
+        meeting_id: 20,
+        workspace_id: 1,
+        initiator_id: 1,
+        participant_id: 2,
+        topic: 'Weekly sync',
+      }))
+      // Also verify meeting.concluded was broadcast
       expect(eventBus.broadcast).toHaveBeenCalledWith('meeting.concluded', expect.objectContaining({
         meeting_id: 1,
       }))
@@ -1020,7 +1195,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when('agents WHERE id', {
@@ -1048,7 +1223,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when('agents WHERE id', {
@@ -1069,7 +1244,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 1, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       // turn_count=1 → odd → participant_id (2) speaks
@@ -1095,7 +1270,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'walking' as const, topic: null, summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
@@ -1107,7 +1282,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 8, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
@@ -1207,7 +1382,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when('agents WHERE id', {
@@ -1233,7 +1408,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       const statusRunMock = vi.fn()
@@ -1431,7 +1606,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -1459,7 +1634,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })

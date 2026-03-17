@@ -20,6 +20,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Cannot schedule meeting with self' }, { status: 400 })
   }
 
+  // Validate recurring_interval_ms if provided
+  if (recurring_interval_ms !== undefined && recurring_interval_ms !== null) {
+    if (typeof recurring_interval_ms !== 'number' || !Number.isFinite(recurring_interval_ms) || recurring_interval_ms < 60000) {
+      return NextResponse.json(
+        { error: 'recurring_interval_ms must be at least 60000 (1 minute)' },
+        { status: 400 }
+      )
+    }
+  }
+
   try {
     const db = getDatabase()
     const workspaceId = auth.user.workspace_id ?? 1
