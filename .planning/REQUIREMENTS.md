@@ -102,9 +102,50 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **QUAL-05**: Each feature has its own SQLite migration(s) via existing migration system
 - [ ] **QUAL-06**: All new API routes follow existing pattern: `requireRole()` → `validateBody()` → `getDatabase()` → `NextResponse.json()`
 
-## v2 Requirements
+## v2.1 Requirements
 
-Deferred to future release. Tracked but not in current roadmap.
+Requirements for Meeting Engine Polish milestone. Each maps to roadmap phases.
+
+### Meeting Engine
+
+- [ ] **MEET-01**: When a meeting concludes, a task is auto-created in the task board with meeting topic as title and outcome summary as description
+- [ ] **MEET-02**: Meeting-created tasks include a reference back to the source meeting ID
+- [ ] **MEET-03**: Collaborator suggestions panel displays top-5 partners ranked by the 5-factor selection algorithm with score breakdown
+- [ ] **MEET-04**: Collaborator suggestion scores update after each meeting based on latest trust data
+- [ ] **MEET-05**: Meeting scheduler supports configurable recurring intervals per agent (not just random initiation)
+- [ ] **MEET-06**: Scheduled meetings respect agent availability (skip agents currently in meetings or busy)
+- [ ] **MEET-07**: Meeting analytics page renders meeting frequency over time as a recharts chart
+- [ ] **MEET-08**: Meeting analytics shows per-agent stats: meeting count, average duration, and trust delta
+- [ ] **MEET-09**: Conversation quality scoring evaluates each meeting transcript via LLM and stores a score (0.0-1.0)
+- [ ] **MEET-10**: Quality scores visible in meeting history list and individual meeting detail view
+
+### Visual Quality
+
+- [ ] **VIZQ-01**: Each agent has a deterministic color derived from agent ID, consistent across desk marker, speech bubble, name label, and canvas indicator
+- [ ] **VIZQ-02**: Speech bubbles use dark theme (dark background, light text) matching the application palette
+- [ ] **VIZQ-03**: Speech bubbles animate out (fade + slide) when conversation ends instead of instant removal
+- [ ] **VIZQ-04**: Meeting detail panel slides in/out with spring-physics CSS transitions
+- [ ] **VIZQ-05**: Agent movement on office canvas uses CSS transform transitions instead of requestAnimationFrame re-renders
+- [ ] **VIZQ-06**: Hovering an agent on the office canvas shows a tooltip with name, role, status, and active meeting info
+- [ ] **VIZQ-07**: Force-directed trust network graph renders agent nodes connected by trust-weighted edges as pure SVG (no D3)
+- [ ] **VIZQ-08**: Trust graph stabilizes within 2 seconds for 20 agents
+- [ ] **VIZQ-09**: Floor tile grid rendered as single CSS background-image repeat instead of 384 individual DOM nodes
+- [ ] **VIZQ-10**: Idle agents display at reduced opacity compared to active/meeting agents, updating in real-time via SSE
+
+### Testing
+
+- [ ] **MTST-01**: Unit tests cover meeting state machine transitions with property-based invariants
+- [ ] **MTST-02**: Unit tests verify 5-factor partner selection algorithm correctness and edge cases
+- [ ] **MTST-03**: Unit tests cover trust score update logic including bounds and decay
+- [ ] **MTST-04**: Integration tests use recorded LLM responses to verify full conversation flow without live API calls
+- [ ] **MTST-05**: Integration tests validate quality scoring produces expected scores for known transcripts
+- [ ] **MTST-06**: E2E tests verify SSE delivers meeting lifecycle events to connected clients
+- [ ] **MTST-07**: E2E tests verify meeting panel renders participants and speech bubbles correctly
+- [ ] **MTST-08**: E2E tests verify canvas markers reflect agent position updates
+
+## v2+ Requirements
+
+Deferred to future releases. Tracked but not in current roadmap.
 
 ### Workflow Engine (Advanced)
 
@@ -139,6 +180,16 @@ Deferred to future release. Tracked but not in current roadmap.
 - **SPAT-V2-02**: Trust score edges between agent pairs on spatial canvas
 - **SPAT-V2-03**: Historical replay (scrub through time to see agent state evolution)
 
+### Visual Quality (Advanced)
+
+- **VIZQ-V2-01**: PixiJS canvas renderer replacing DOM-based office visualization
+- **VIZQ-V2-02**: 3D trust network visualization with WebGL
+
+### Meeting Engine (Advanced)
+
+- **MEET-V2-01**: Meeting recording and playback with timeline scrubbing
+- **MEET-V2-02**: Cross-workspace meeting coordination
+
 ## Out of Scope
 
 Explicitly excluded. Documented to prevent scope creep.
@@ -157,6 +208,9 @@ Explicitly excluded. Documented to prevent scope creep.
 | Icon libraries | CLAUDE.md convention: raw text/emoji only |
 | Tailwind CSS v4 upgrade | Project on v3; upgrading breaks unlayered CSS vs @layer utilities |
 | npm/yarn | pnpm only per project convention |
+| PixiJS migration | Deferred to separate milestone; DOM/CSS approach first |
+| D3.js for trust graph | Custom force sim avoids heavy dependency |
+| Framer Motion / animation libraries | CSS transitions sufficient per CLAUDE.md |
 
 ## Traceability
 
@@ -236,12 +290,19 @@ Which phases cover which requirements. Updated by create-roadmap.
 | QUAL-05 | Phase 8: Integration & Polish | Done |
 | QUAL-06 | Phase 8: Integration & Polish | Done |
 
-**Coverage:**
+**v1 Coverage:**
 - v1 requirements: 71 total
 - Mapped to phases: 71
 - Completed: 71 (100%)
 - Unmapped: 0
 
+**v2.1 Coverage:**
+- v2.1 requirements: 28 total (10 MEET + 10 VIZQ + 8 MTST)
+- Mapped to phases: 0 (awaiting roadmap)
+- Completed: 0
+- Unmapped: 28
+
 ---
 *Requirements defined: 2026-03-15*
-*Last updated: 2026-03-15 — all 71 requirements verified DONE*
+*v1 completed: 2026-03-15 — all 71 requirements verified DONE*
+*v2.1 defined: 2026-03-17 — 28 requirements across 3 categories*
