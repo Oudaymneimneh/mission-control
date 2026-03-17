@@ -4,61 +4,57 @@
 
 See: .planning/PROJECT.md (updated 2026-03-17)
 
-**Core value:** Complete meeting system with production features, polish office canvas visual quality, achieve comprehensive meeting test coverage
-**Current focus:** v2.1 COMPLETE
+**Core value:** Definitive open-source platform for orchestrating AI agent teams
+**Current focus:** No active milestone — v2.1 shipped
 
 ## Current Position
 
-Phase: 15 of 15 — ALL COMPLETE
-Plan: Finished
-Status: v2.1 shipped
-Last activity: 2026-03-17 — All 7 phases complete, 1310 tests passing
+Phase: None active
+Plan: None active
+Status: v2.1 shipped and archived
+Last activity: 2026-03-17 — v2.1 milestone archived
 
-Progress: ██████████████████████████████ 100% (15/15 phases complete)
+## Shipped Milestones
 
-v2.1 Progress: ██████████ 100% (7/7 v2.1 phases complete)
+- **v1.0 MVP** — 8 phases, 71 requirements, shipped 2026-03-15
+- **v2.0 Meeting Engine + Hardening** — shipped 2026-03-16
+- **v2.1 Meeting Engine Polish** — 7 phases, 28 requirements, shipped 2026-03-17
 
 ## Performance Metrics
 
-**Velocity:**
-- Total plans completed: 30 (v1.0)
+**v1.0:**
+- Total plans completed: 30
 - Average duration: ~25 min
 - Total execution time: ~12.5 hours
 
-**By Phase (v1.0):**
-
-| Phase | Plans | Status |
-|-------|-------|--------|
-| 1. Foundation | 5 | Complete |
-| 2. Spatial Visualization | 5 | Complete |
-| 3. Workflow Engine | 4 | Complete |
-| 4. Team Chat | 4 | Complete |
-| 5. Debate/Consensus | 4 | Complete |
-| 6. Persona Simulation | 3 | Complete |
-| 7. Auto-Scaling | 3 | Complete |
-| 8. Integration & Polish | 2 | Complete |
+**v2.1:**
+- Total phases: 7 (Phases 9-15)
+- Execution: Wave-based parallel agents (single session)
+- Requirements: 28/28 (100%)
+- Tests: 1310 unit + 760 E2E, 0 failures
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
+Validated decisions:
 - CSS transitions over rAF for agent movement (Validated — Phase 9)
 - Force layout without D3 — custom Verlet sim (Validated — Phase 14)
+- Golden angle hue rotation for agent colors (Validated — Phase 9)
+- Recorded LLM fixtures for integration tests (Validated — Phase 15)
 - PixiJS deferred to separate milestone (Decided)
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-None yet.
+None.
 
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: v2.1 COMPLETE — all 28 requirements implemented and tested
+Stopped at: v2.1 ARCHIVED — milestone completion workflow done
 Resume file: None
