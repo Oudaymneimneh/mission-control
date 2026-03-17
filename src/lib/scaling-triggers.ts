@@ -17,6 +17,9 @@ let initialized = false
 let lastEvalTime = 0
 const EVAL_COOLDOWN_MS = 10_000
 
+/** Stored listener reference for clean removal on reset. */
+let activeListener: ((event: { type: string }) => void) | null = null
+
 /**
  * Wire EventBus task events to scaling evaluation.
  * Call once at startup (e.g., from simulation engine start).
@@ -34,7 +37,7 @@ export function initScalingTriggers(): void {
     evaluateAutoApprovePolicies()
   }
 
-  eventBus.on('server-event', (event: { type: string }) => {
+  activeListener = (event: { type: string }) => {
     if (
       event.type === 'task.created' ||
       event.type === 'task.status_changed' ||
@@ -42,7 +45,9 @@ export function initScalingTriggers(): void {
     ) {
       handler()
     }
-  })
+  }
+
+  eventBus.on('server-event', activeListener)
 
   logger.info('Scaling triggers initialized — listening for task events')
 }
@@ -74,8 +79,12 @@ function evaluateAutoApprovePolicies(): void {
   }
 }
 
-/** Reset for testing. */
+/** Reset for testing — removes EventBus listener to prevent double-firing. */
 export function resetScalingTriggers(): void {
+  if (activeListener) {
+    eventBus.off('server-event', activeListener)
+    activeListener = null
+  }
   initialized = false
   lastEvalTime = 0
 }

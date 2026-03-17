@@ -41,6 +41,13 @@ vi.mock('@/lib/agent-memory', () => ({
   reflect: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock('@/lib/meeting-engine', () => ({
+  processActiveMeeting: vi.fn().mockResolvedValue(false),
+  attemptMeetingInitiation: vi.fn().mockResolvedValue(false),
+  initializeAgentPosition: vi.fn(),
+  cancelAgentMeetings: vi.fn(),
+}))
+
 import {
   SimulationEngine,
   isSimulationEnabled,

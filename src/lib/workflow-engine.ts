@@ -54,7 +54,7 @@ export function createWorkflowRun(
   createdBy: string,
   workspaceId: number
 ): { runId: number } {
-  return writeTransaction(db, (txDb) => {
+  const txResult = writeTransaction(db, (txDb) => {
     const template = txDb.prepare('SELECT id, name FROM workflow_templates WHERE id = ?').get(templateId) as { id: number; name: string } | undefined
     if (!template) throw new Error(`Template ${templateId} not found`)
 
@@ -84,14 +84,22 @@ export function createWorkflowRun(
     // WKFL-06: Create task in task board for the first running phase
     createTaskForPhase(txDb, runId, phases[0], workspaceId)
 
-    eventBus.broadcast('workflow.run.started', {
-      runId,
-      workflowId: templateId,
-      templateName: template.name,
-    })
-
-    return { runId }
+    return { runId, templateName: template.name }
   })
+
+  // Broadcast after transaction commits — prevents listener coupling
+  eventBus.broadcast('workflow.run.started', {
+    runId: txResult.runId,
+    workflowId: templateId,
+    templateName: txResult.templateName,
+  })
+
+  eventBus.broadcast('task.created', {
+    workspaceId,
+    source: 'workflow-engine',
+  })
+
+  return { runId: txResult.runId }
 }
 
 // ── Complete Phase ──
@@ -150,7 +158,10 @@ export function advanceWorkflow(
   db: Database.Database,
   runId: number
 ): { status: string; nextPhase?: { id: number; name: string; requiresApproval: boolean } } {
-  return writeTransaction(db, (txDb) => {
+  // Track which events to broadcast after transaction
+  const pendingEvents: Array<{ type: keyof import('./event-bus').EventDataMap; data: Record<string, unknown> }> = []
+
+  const result = writeTransaction(db, (txDb) => {
     const run = txDb.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(runId) as WorkflowRunRow | undefined
     if (!run) throw new Error('Run not found')
     if (run.status !== 'running') throw new Error(`Run is ${run.status}, expected running`)
@@ -180,7 +191,7 @@ export function advanceWorkflow(
         WHERE id = ?
       `).run(runId)
 
-      eventBus.broadcast('workflow.run.completed', { runId, status: 'completed' })
+      pendingEvents.push({ type: 'workflow.run.completed', data: { runId, status: 'completed' } })
       return { status: 'completed' }
     }
 
@@ -201,10 +212,9 @@ export function advanceWorkflow(
         WHERE id = ?
       `).run(nextPhaseDef.id, runId)
 
-      eventBus.broadcast('workflow.phase.approval_required', {
-        runId,
-        phaseId: nextPhaseDef.id,
-        phaseName: nextPhaseDef.name,
+      pendingEvents.push({
+        type: 'workflow.phase.approval_required',
+        data: { runId, phaseId: nextPhaseDef.id, phaseName: nextPhaseDef.name },
       })
 
       return {
@@ -227,17 +237,24 @@ export function advanceWorkflow(
     // WKFL-06: Create task in task board for the newly running phase
     createTaskForPhase(txDb, runId, nextPhaseDef, run.workspace_id)
 
-    eventBus.broadcast('workflow.phase.transition', {
-      runId,
-      fromPhase: currentPhaseDef.name,
-      toPhase: nextPhaseDef.name,
+    pendingEvents.push({
+      type: 'workflow.phase.transition',
+      data: { runId, fromPhase: currentPhaseDef.name, toPhase: nextPhaseDef.name },
     })
+    pendingEvents.push({ type: 'task.created', data: { workspaceId: run.workspace_id, source: 'workflow-engine' } })
 
     return {
       status: 'running',
       nextPhase: { id: nextPhaseDef.id, name: nextPhaseDef.name, requiresApproval: false },
     }
   })
+
+  // Broadcast all events after transaction commits
+  for (const evt of pendingEvents) {
+    eventBus.broadcast(evt.type, evt.data as never)
+  }
+
+  return result
 }
 
 // ── Approve Phase ──
@@ -282,7 +299,7 @@ export function rejectPhase(
   phaseRunId: number,
   reason: string
 ): { status: string } {
-  return writeTransaction(db, (txDb) => {
+  const result = writeTransaction(db, (txDb) => {
     const phaseRun = txDb.prepare(
       'SELECT * FROM workflow_phase_runs WHERE id = ? AND run_id = ?'
     ).get(phaseRunId, runId) as WorkflowPhaseRunRow | undefined
@@ -301,14 +318,18 @@ export function rejectPhase(
       WHERE id = ?
     `).run(runId)
 
-    eventBus.broadcast('workflow.run.completed', { runId, status: 'failed' })
-
     return { status: 'failed' }
   })
+
+  // Broadcast after transaction commits — prevents listener coupling
+  eventBus.broadcast('workflow.run.completed', { runId, status: 'failed' })
+
+  return result
 }
 
 // ── Task Board Integration (WKFL-06) ──
 
+/** Insert a task for a workflow phase. Call inside writeTransaction. Broadcast externally. */
 function createTaskForPhase(
   db: Database.Database,
   runId: number,
@@ -325,11 +346,6 @@ function createTaskForPhase(
     workspaceId,
     JSON.stringify({ workflow_run_id: runId, workflow_phase_id: phase.id })
   )
-
-  eventBus.broadcast('task.created', {
-    workspaceId,
-    source: 'workflow-engine',
-  })
 }
 
 // ── Get Run Status ──

@@ -600,6 +600,8 @@
     "recurring": "WIEDERKEHREND",
     "spawned": "ERSTELLT",
     "spawnedFromTask": "Aus Aufgabe #{id} erstellt",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "Nicht zugewiesen",
     "due": "Fällig:",
     "dropTasksHere": "Aufgaben hier ablegen",

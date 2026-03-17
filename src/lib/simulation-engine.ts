@@ -4,10 +4,12 @@
  * Lazy-init pattern (NO module-level timers per Sprint 1 S5/S6 fixes).
  *
  * Agent tick behavior (AI Town pattern):
- *   Priority 1: Pending tasks → work on task
- *   Priority 2: Unmemorized conversations → store memory
- *   Priority 3: Reflection threshold met → generate reflections
- *   Priority 4: Do something → LLM picks next action
+ *   Priority 1: Active meeting participation → conversation turns, summarization
+ *   Priority 1.5: Pending tasks → work on task
+ *   Priority 2: Autonomous actions → mentions, workflows, debates
+ *   Priority 3: Unmemorized conversations → store memory
+ *   Priority 4: Reflection threshold met → generate reflections
+ *   Priority 5: Meeting initiation / do something → LLM picks next action
  *
  * Safety controls:
  *   - SIMULATION_ENABLED=false by default (opt-in)
@@ -27,6 +29,8 @@ import { recall, observe } from '@/lib/agent-memory'
 import { eventBus } from '@/lib/event-bus'
 import { executeAutonomousAction } from '@/lib/agent-actions'
 import { initScalingTriggers } from '@/lib/scaling-triggers'
+import { processActiveMeeting, attemptMeetingInitiation, initializeAgentPosition, cancelAgentMeetings, canInitiateMeeting, createMeeting } from '@/lib/meeting-engine'
+import type { MeetingRow, AgentForMeeting } from '@/lib/meeting-engine'
 
 // --- Types ---
 
@@ -45,6 +49,7 @@ interface AgentTickState {
   lastConversationPartner: number | null
   inProgressOperation: string | null
   inProgressStartTime: number
+  workspaceId: number
 }
 
 interface AgentRow {
@@ -77,6 +82,7 @@ export class SimulationEngine {
   private config: SimulationConfig
   private agentStates = new Map<number, AgentTickState>()
   private tickCount = 0
+  private tickInProgress = false
 
   constructor(config?: Partial<SimulationConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -166,25 +172,56 @@ export class SimulationEngine {
 
   /** Execute a single tick — process all idle agents. */
   async tick(): Promise<void> {
-    this.tickCount++
-    const db = getDatabase()
-
-    // Get all idle agents
-    const agents = db.prepare(
-      "SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE status = 'idle'"
-    ).all() as AgentRow[]
-
-    for (const agent of agents) {
-      try {
-        await this.agentTick(agent)
-      } catch (err) {
-        logger.error({ err, agentId: agent.id }, 'Agent tick error')
-      }
+    // Re-entrant guard: skip if previous tick is still running
+    if (this.tickInProgress) {
+      logger.debug('Tick skipped — previous tick still in progress')
+      return
     }
 
-    // Evaluate auto-approve scaling policies (once per tick, not per-agent)
-    if (this.tickCount % 12 === 0) { // Every 60s at 5s tick interval
-      this.evaluateScalingPolicies(db)
+    this.tickInProgress = true
+    try {
+      this.tickCount++
+      const db = getDatabase()
+
+      // Get all idle agents
+      const agents = db.prepare(
+        "SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE status = 'idle'"
+      ).all() as AgentRow[]
+
+      // Prune agentStates for agents no longer in idle pool + cancel stale meetings
+      const activeIds = new Set(agents.map((a) => a.id))
+      for (const [id, state] of this.agentStates.entries()) {
+        if (!activeIds.has(id)) {
+          try {
+            cancelAgentMeetings(db, id, state.workspaceId)
+          } catch {
+            // Meeting table may not exist yet
+          }
+          this.agentStates.delete(id)
+        }
+      }
+
+      for (const agent of agents) {
+        // Ensure agent has an office position on first tick
+        try {
+          initializeAgentPosition(db, agent.id, agent.workspace_id)
+        } catch {
+          // Position table may not exist yet on first migration
+        }
+
+        try {
+          await this.agentTick(agent)
+        } catch (err) {
+          logger.error({ err, agentId: agent.id }, 'Agent tick error')
+        }
+      }
+
+      // Evaluate auto-approve scaling policies (once per tick, not per-agent)
+      if (this.tickCount % 12 === 0) { // Every 60s at 5s tick interval
+        this.evaluateScalingPolicies(db)
+      }
+    } finally {
+      this.tickInProgress = false
     }
   }
 
@@ -218,7 +255,7 @@ export class SimulationEngine {
 
   /** Process a single agent's tick. */
   private async agentTick(agent: AgentRow): Promise<void> {
-    const state = this.getAgentState(agent.id)
+    const state = this.getAgentState(agent.id, agent.workspace_id)
     const now = Date.now()
 
     // Check for in-progress operation timeout
@@ -239,7 +276,61 @@ export class SimulationEngine {
       return
     }
 
-    // Priority 1: Pending tasks
+    // Priority 0: Scheduled meetings — activate if ready
+    try {
+      if (!this.config.dryRun) {
+        const db = getDatabase()
+        const nowSec = Math.floor(Date.now() / 1000)
+        const scheduled = db.prepare(`
+          SELECT * FROM agent_meetings
+          WHERE workspace_id = ? AND status = 'scheduled'
+            AND (initiator_id = ? OR participant_id = ?)
+            AND (scheduled_for IS NULL OR scheduled_for <= ?)
+          LIMIT 1
+        `).get(agent.workspace_id, agent.id, agent.id, nowSec) as MeetingRow | undefined
+
+        if (scheduled && canInitiateMeeting(db, scheduled.initiator_id, scheduled.workspace_id)) {
+          const init = db.prepare(
+            'SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE id = ?'
+          ).get(scheduled.initiator_id) as AgentForMeeting | undefined
+          const part = db.prepare(
+            'SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE id = ?'
+          ).get(scheduled.participant_id) as AgentForMeeting | undefined
+
+          if (init && part) {
+            db.prepare('DELETE FROM agent_meetings WHERE id = ?').run(scheduled.id)
+            createMeeting(db, init, part)
+            state.lastActionTime = now
+            return
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, agentId: agent.id }, 'Scheduled meeting check failed')
+    }
+
+    // Priority 1: Active meeting participation (must run before tasks — agents in meetings must continue)
+    try {
+      if (!this.config.dryRun) {
+        const inMeeting = await processActiveMeeting({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          status: agent.status,
+          soul_content: agent.soul_content,
+          config: agent.config,
+          workspace_id: agent.workspace_id,
+        })
+        if (inMeeting) {
+          state.lastActionTime = now
+          return
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, agentId: agent.id }, 'Meeting participation failed')
+    }
+
+    // Priority 1.5: Pending tasks
     const pendingTask = this.getNextPendingTask(agent.id, agent.workspace_id)
     if (pendingTask) {
       if (this.config.dryRun) {
@@ -248,9 +339,14 @@ export class SimulationEngine {
       }
       state.inProgressOperation = `task-${pendingTask.id}`
       state.inProgressStartTime = now
-      await this.workOnTask(agent, pendingTask)
-      state.inProgressOperation = null
-      return
+      try {
+        await this.workOnTask(agent, pendingTask)
+        state.inProgressOperation = null
+        return
+      } catch (err) {
+        logger.warn({ err, agentId: agent.id, taskId: pendingTask.id }, 'Work on task failed')
+        state.inProgressOperation = null
+      }
     }
 
     // Priority 1.5: Autonomous actions (mentions, workflows, debates)
@@ -328,6 +424,27 @@ export class SimulationEngine {
       return // On cooldown
     }
 
+    // Priority 4a: Meeting initiation — persona-driven propensity check
+    try {
+      if (!this.config.dryRun) {
+        const initiated = await attemptMeetingInitiation({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          status: agent.status,
+          soul_content: agent.soul_content,
+          config: agent.config,
+          workspace_id: agent.workspace_id,
+        })
+        if (initiated) {
+          state.lastActionTime = now
+          return
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, agentId: agent.id }, 'Meeting initiation failed')
+    }
+
     if (this.config.dryRun) {
       logger.info({ agentId: agent.id, dryRun: true }, 'Would do something')
       return
@@ -338,7 +455,7 @@ export class SimulationEngine {
   }
 
   /** Get or create agent tick state. */
-  private getAgentState(agentId: number): AgentTickState {
+  private getAgentState(agentId: number, workspaceId: number = 1): AgentTickState {
     let state = this.agentStates.get(agentId)
     if (!state) {
       state = {
@@ -347,6 +464,7 @@ export class SimulationEngine {
         lastConversationPartner: null,
         inProgressOperation: null,
         inProgressStartTime: 0,
+        workspaceId,
       }
       this.agentStates.set(agentId, state)
     }

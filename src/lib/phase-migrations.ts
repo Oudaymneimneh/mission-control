@@ -515,4 +515,91 @@ registerMigrations([
       `)
     }
   },
+  {
+    id: 'phase_058_agent_meetings',
+    up: (db: Database.Database) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_meetings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id INTEGER NOT NULL,
+          initiator_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          participant_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'walking',
+          topic TEXT,
+          summary TEXT,
+          location_x INTEGER,
+          location_y INTEGER,
+          turn_count INTEGER NOT NULL DEFAULT 0,
+          max_turns INTEGER NOT NULL DEFAULT 6,
+          started_at INTEGER,
+          concluded_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_meetings_workspace ON agent_meetings(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_meetings_status ON agent_meetings(status);
+        CREATE INDEX IF NOT EXISTS idx_agent_meetings_initiator ON agent_meetings(initiator_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_meetings_participant ON agent_meetings(participant_id);
+
+        CREATE TABLE IF NOT EXISTS meeting_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          meeting_id INTEGER NOT NULL REFERENCES agent_meetings(id) ON DELETE CASCADE,
+          agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          content TEXT NOT NULL,
+          turn_number INTEGER NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_messages_meeting ON meeting_messages(meeting_id);
+
+        CREATE TABLE IF NOT EXISTS agent_office_positions (
+          agent_id INTEGER PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+          workspace_id INTEGER NOT NULL,
+          x INTEGER NOT NULL DEFAULT 0,
+          y INTEGER NOT NULL DEFAULT 0,
+          target_x INTEGER,
+          target_y INTEGER,
+          zone TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_office_positions_workspace ON agent_office_positions(workspace_id);
+      `)
+    }
+  },
+  {
+    id: 'phase_059_meeting_task_source',
+    up: (db: Database.Database) => {
+      const cols = db.pragma('table_info(tasks)') as Array<{ name: string }>
+      const colNames = cols.map(c => c.name)
+      if (!colNames.includes('source_type')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN source_type TEXT`)
+      }
+      if (!colNames.includes('source_id')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN source_id INTEGER`)
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source_type, source_id)`)
+    }
+  },
+  {
+    id: 'phase_060_meeting_quality_scheduling',
+    up: (db: Database.Database) => {
+      const cols = db.pragma('table_info(agent_meetings)') as Array<{ name: string }>
+      const colNames = cols.map(c => c.name)
+      if (!colNames.includes('quality_score')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN quality_score TEXT`)
+      }
+      if (!colNames.includes('scheduled_for')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN scheduled_for INTEGER`)
+      }
+    }
+  },
+  {
+    id: 'phase_061_recurring_meetings',
+    up: (db: Database.Database) => {
+      const cols = db.pragma('table_info(agent_meetings)') as Array<{ name: string }>
+      if (!cols.some(c => c.name === 'recurring_interval_ms')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN recurring_interval_ms INTEGER DEFAULT NULL`)
+      }
+    }
+  },
 ])

@@ -42,6 +42,25 @@ interface WorkloadMetrics {
   busyRatio: number
 }
 
+// ── Workload API mapping ──
+
+// The /api/workload endpoint returns { queue: { total_pending }, agents: { online, busy, idle, busy_ratio } }
+// Map that shape into the flat WorkloadMetrics the panel components expect.
+function mapWorkloadToMetrics(data: Record<string, unknown>): WorkloadMetrics {
+  const queue = data.queue as Record<string, unknown> | undefined
+  const agents = data.agents as Record<string, unknown> | undefined
+  const online = Number(agents?.online ?? 0)
+  const busy = Number(agents?.busy ?? 0)
+  const idle = Number(agents?.idle ?? 0)
+  return {
+    queueDepth: Number(queue?.total_pending ?? 0),
+    activeAgents: online || (busy + idle),
+    idleAgents: idle,
+    busyAgents: busy,
+    busyRatio: Number(agents?.busy_ratio ?? 0),
+  }
+}
+
 // ── Helpers ──
 
 function eventStatusBadge(status: string): string {
@@ -486,13 +505,7 @@ export function ScalingPanel() {
         const res = await fetch('/api/workload')
         if (!res.ok) return
         const data = await res.json()
-        setMetrics({
-          queueDepth: data.metrics?.queueDepth ?? data.queueDepth ?? 0,
-          activeAgents: data.metrics?.activeAgents ?? data.activeAgents ?? 0,
-          idleAgents: data.metrics?.idleAgents ?? data.idleAgents ?? 0,
-          busyAgents: data.metrics?.busyAgents ?? data.busyAgents ?? 0,
-          busyRatio: data.metrics?.busyRatio ?? data.busyRatio ?? 0,
-        })
+        setMetrics(mapWorkloadToMetrics(data))
       } catch { /* ignore */ }
     }
     loadMetrics()
@@ -510,13 +523,7 @@ export function ScalingPanel() {
           // Refresh metrics immediately on scaling events
           fetch('/api/workload').then(r => r.ok ? r.json() : null).then(data => {
             if (data) {
-              setMetrics({
-                queueDepth: data.metrics?.queueDepth ?? data.queueDepth ?? 0,
-                activeAgents: data.metrics?.activeAgents ?? data.activeAgents ?? 0,
-                idleAgents: data.metrics?.idleAgents ?? data.idleAgents ?? 0,
-                busyAgents: data.metrics?.busyAgents ?? data.busyAgents ?? 0,
-                busyRatio: data.metrics?.busyRatio ?? data.busyRatio ?? 0,
-              })
+              setMetrics(mapWorkloadToMetrics(data))
             }
           }).catch(() => {})
         }

@@ -600,6 +600,8 @@
     "recurring": "RECORRENTE",
     "spawned": "GERADO",
     "spawnedFromTask": "Gerado da tarefa #{id}",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "Não atribuído",
     "due": "Vencimento:",
     "dropTasksHere": "Solte tarefas aqui",

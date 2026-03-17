@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Loader } from '@/components/ui/loader'
 import { useMissionControl, Agent } from '@/store'
 import { buildOfficeLayout } from '@/lib/office-layout'
+import { getInitials, getAgentColor } from '@/lib/format-utils'
+import { MeetingPanel } from '@/components/panels/meeting-panel'
 
 type ViewMode = 'office' | 'org-chart'
 type OrgSegmentMode = 'category' | 'role' | 'status'
@@ -27,24 +29,6 @@ interface SeatPosition {
   seatKey: string
   x: number
   y: number
-}
-
-interface MovingWorker {
-  id: string
-  agentId: number
-  initials: string
-  colorClass: string
-  startX: number
-  startY: number
-  endX: number
-  endY: number
-  startedAt: number
-  durationMs: number
-  progress: number
-  path: Array<{ x: number; y: number }>
-  pathLengths: number[]
-  totalLength: number
-  destinationTile: string
 }
 
 type SidebarFilter = 'all' | 'working' | 'idle' | 'attention'
@@ -125,6 +109,7 @@ interface PersistedOfficePrefs {
   showSidebar: boolean
   showMinimap: boolean
   showEvents: boolean
+  showMeetingPanel?: boolean
   roomLayout: MapRoom[]
   mapProps: MapProp[]
 }
@@ -157,27 +142,6 @@ const statusEmoji: Record<string, string> = {
   offline: '',
 }
 
-function getInitials(name: string): string {
-  return name
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map(w => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-}
-
-function hashColor(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  const colors = [
-    'bg-blue-600', 'bg-emerald-600', 'bg-violet-600', 'bg-amber-600',
-    'bg-rose-600', 'bg-cyan-600', 'bg-indigo-600', 'bg-teal-600',
-    'bg-orange-600', 'bg-pink-600', 'bg-lime-600', 'bg-fuchsia-600',
-  ]
-  return colors[Math.abs(hash) % colors.length]
-}
-
 function hashNumber(value: string): number {
   let hash = 0
   for (let i = 0; i < value.length; i += 1) {
@@ -195,14 +159,6 @@ function formatLastSeen(ts?: number, t?: (key: string, values?: Record<string, u
   const h = Math.floor(m / 60)
   if (h < 24) return t ? t('hoursAgo', { hours: h }) : `${h}h ago`
   return t ? t('daysAgo', { days: Math.floor(h / 24) }) : `${Math.floor(h / 24)}d ago`
-}
-
-function easeInOut(progress: number): number {
-  if (progress <= 0) return 0
-  if (progress >= 1) return 1
-  return progress < 0.5
-    ? 2 * progress * progress
-    : 1 - Math.pow(-2 * progress + 2, 2) / 2
 }
 
 function getStatusEmote(status: Agent['status']): string {
@@ -449,24 +405,6 @@ function buildPath(startX: number, startY: number, endX: number, endY: number, b
   return { path, pathLengths, totalLength }
 }
 
-function pointAlongPath(path: Array<{ x: number; y: number }>, pathLengths: number[], totalLength: number, progress: number) {
-  if (path.length === 0) return { x: 0, y: 0 }
-  if (path.length === 1 || totalLength <= 0) return path[path.length - 1]
-  const target = totalLength * clamp(progress, 0, 1)
-  let idx = 1
-  while (idx < pathLengths.length && pathLengths[idx] < target) idx += 1
-  const prevIdx = Math.max(0, idx - 1)
-  const prevLen = pathLengths[prevIdx] ?? 0
-  const nextLen = pathLengths[Math.min(idx, pathLengths.length - 1)] ?? totalLength
-  const local = nextLen > prevLen ? (target - prevLen) / (nextLen - prevLen) : 0
-  const a = path[prevIdx]
-  const b = path[Math.min(idx, path.length - 1)]
-  return {
-    x: a.x + (b.x - a.x) * local,
-    y: a.y + (b.y - a.y) * local,
-  }
-}
-
 export function OfficePanel() {
   const t = useTranslations('office')
   const { agents, dashboardMode, currentUser } = useMissionControl()
@@ -488,6 +426,7 @@ export function OfficePanel() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showMinimap, setShowMinimap] = useState(true)
   const [showEvents, setShowEvents] = useState(true)
+  const [showMeetingPanel, setShowMeetingPanel] = useState(false)
   const [localSessionFilter, setLocalSessionFilter] = useState<'running' | 'not-running'>('running')
   const [loading, setLoading] = useState(true)
   const [localBootstrapping, setLocalBootstrapping] = useState(isLocalMode)
@@ -506,11 +445,47 @@ export function OfficePanel() {
   const launchToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const roamReturnTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
   const movingAgentIdsRef = useRef<Set<number>>(new Set())
-  const movingWorkersRef = useRef<MovingWorker[]>([])
   const renderedWorkersRef = useRef<Array<{ agent: Agent; x: number; y: number; zoneLabel: string; seatLabel: string; isMoving: boolean; direction: { dx: number; dy: number }; variant: WorkerVariant }>>([])
   const [transitioningAgentIds, setTransitioningAgentIds] = useState<Set<number>>(new Set())
   const previousSeatMapRef = useRef<Map<number, SeatPosition>>(new Map())
-  const [movingWorkers, setMovingWorkers] = useState<MovingWorker[]>([])
+  const [movingAgentTargets, setMovingAgentTargets] = useState<Map<number, { x: number; y: number; dx: number; dy: number }>>(new Map())
+  const movingTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Meeting state
+  const [activeMeetings, setActiveMeetings] = useState<Array<{
+    meeting_id: number
+    initiator_id: number
+    participant_id: number
+    initiator_name: string
+    participant_name: string
+    location_x: number
+    location_y: number
+    status: 'walking' | 'conversing'
+    turn_count: number
+    max_turns: number
+  }>>([])
+  const [meetingSpeechBubbles, setMeetingSpeechBubbles] = useState<Map<number, { agentName: string; content: string; timestamp: number }>>(new Map())
+  const [dismissingBubbles, setDismissingBubbles] = useState<Set<number>>(new Set())
+  const [hoveredAgentId, setHoveredAgentId] = useState<number | null>(null)
+  const meetingBubbleTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+  const activeMeetingsRef = useRef(activeMeetings)
+  activeMeetingsRef.current = activeMeetings
+
+  const dismissBubble = useCallback((agentId: number) => {
+    setDismissingBubbles((prev) => new Set(prev).add(agentId))
+    setTimeout(() => {
+      setMeetingSpeechBubbles((current) => {
+        const next = new Map(current)
+        next.delete(agentId)
+        return next
+      })
+      setDismissingBubbles((prev) => {
+        const next = new Set(prev)
+        next.delete(agentId)
+        return next
+      })
+    }, 300)
+  }, [])
 
   const fetchAgents = useCallback(async () => {
     let nextLocalAgents: Agent[] = []
@@ -745,61 +720,28 @@ export function OfficePanel() {
     return workers
   }, [currentSeatMap, officeLayout])
 
-  const floorTiles = useMemo(() => {
-    const tiles: Array<{ id: string; x: number; y: number; w: number; h: number; sprite: boolean }> = []
-    const tileW = 100 / MAP_COLS
-    const tileH = 100 / MAP_ROWS
-    for (let row = 0; row < MAP_ROWS; row += 1) {
-      for (let col = 0; col < MAP_COLS; col += 1) {
-        tiles.push({
-          id: `tile-${row}-${col}`,
-          x: col * tileW,
-          y: row * tileH,
-          w: tileW,
-          h: tileH,
-          sprite: (row + col) % 2 === 0,
-        })
-      }
-    }
-    return tiles
-  }, [])
-
-  const movingPositionByAgent = useMemo(() => {
-    const positions = new Map<number, { x: number; y: number }>()
-    for (const worker of movingWorkers) {
-      const eased = easeInOut(worker.progress)
-      positions.set(
-        worker.agentId,
-        pointAlongPath(worker.path, worker.pathLengths, worker.totalLength, eased),
-      )
-    }
-    return positions
-  }, [movingWorkers])
-
-  const movingDirectionByAgent = useMemo(() => {
-    const directions = new Map<number, { dx: number; dy: number }>()
-    for (const worker of movingWorkers) {
-      directions.set(worker.agentId, {
-        dx: worker.endX - worker.startX,
-        dy: worker.endY - worker.startY,
-      })
-    }
-    return directions
-  }, [movingWorkers])
-
   const renderedWorkers = useMemo(() => {
     return gameWorkers.map((worker) => {
-      const movingPosition = movingPositionByAgent.get(worker.agent.id)
+      const target = movingAgentTargets.get(worker.agent.id)
       return {
         ...worker,
-        x: movingPosition?.x ?? worker.x,
-        y: movingPosition?.y ?? worker.y,
-        isMoving: Boolean(movingPosition),
-        direction: movingDirectionByAgent.get(worker.agent.id) || { dx: 0, dy: 0 },
+        x: target?.x ?? worker.x,
+        y: target?.y ?? worker.y,
+        isMoving: Boolean(target),
+        direction: target ? { dx: target.dx, dy: target.dy } : { dx: 0, dy: 0 },
         variant: getWorkerVariant(worker.agent.name),
       }
     })
-  }, [gameWorkers, movingDirectionByAgent, movingPositionByAgent])
+  }, [gameWorkers, movingAgentTargets])
+
+  const meetingAgentIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const m of activeMeetings) {
+      ids.add(m.initiator_id)
+      ids.add(m.participant_id)
+    }
+    return ids
+  }, [activeMeetings])
 
   const officePrefsKey = useMemo(() => {
     const userPart = currentUser?.id ? `u${currentUser.id}` : `guest-${currentUser?.username || 'anon'}`
@@ -828,6 +770,7 @@ export function OfficePanel() {
       setShowSidebar(prefs.showSidebar !== false)
       setShowMinimap(prefs.showMinimap !== false)
       setShowEvents(prefs.showEvents !== false)
+      setShowMeetingPanel(prefs.showMeetingPanel === true)
       if (Array.isArray(prefs.roomLayout) && prefs.roomLayout.length > 0) {
         setRoomLayoutState(prefs.roomLayout.map((room) => ({ ...room })))
       }
@@ -852,6 +795,7 @@ export function OfficePanel() {
       showSidebar,
       showMinimap,
       showEvents,
+      showMeetingPanel,
       roomLayout: roomLayoutState,
       mapProps: mapPropsState,
     }
@@ -868,6 +812,7 @@ export function OfficePanel() {
     localSessionFilter,
     roomLayoutState,
     showEvents,
+    showMeetingPanel,
     showMinimap,
     showSidebar,
     sidebarFilter,
@@ -961,6 +906,32 @@ export function OfficePanel() {
     }
   }, [timeTheme])
 
+  const floorStyle = useMemo(() => {
+    const tileW = `${100 / MAP_COLS}%`
+    const tileH = `${100 / MAP_ROWS}%`
+    return {
+      backgroundImage: `url('/office-sprites/kenney/floorFull.png')`,
+      backgroundRepeat: 'repeat',
+      backgroundSize: `${tileW} ${tileH}`,
+      opacity: themePalette.floorOpacityA,
+      filter: themePalette.floorFilter,
+    } as React.CSSProperties
+  }, [themePalette.floorOpacityA, themePalette.floorFilter])
+
+  const floorCheckerboardStyle = useMemo(() => {
+    const tileW = 100 / MAP_COLS
+    const tileH = 100 / MAP_ROWS
+    // Darken alternating tiles from floorOpacityA to floorOpacityB
+    // Base opacity is A; overlay alpha => A * (1 - alpha) = B => alpha = 1 - B/A
+    const alpha = themePalette.floorOpacityA > 0
+      ? 1 - themePalette.floorOpacityB / themePalette.floorOpacityA
+      : 0
+    return {
+      background: `repeating-conic-gradient(transparent 0% 25%, rgba(0,0,0,${alpha}) 0% 50%)`,
+      backgroundSize: `${tileW * 2}% ${tileH * 2}%`,
+    } as React.CSSProperties
+  }, [themePalette.floorOpacityA, themePalette.floorOpacityB])
+
   const nightSparkles = useMemo(
     () =>
       Array.from({ length: 14 }, (_, idx) => {
@@ -1045,37 +1016,33 @@ export function OfficePanel() {
   }, [gameWorkers])
 
   const enqueueMovement = useCallback(
-    (agent: Agent, startX: number, startY: number, endX: number, endY: number, durationMs = 2200) => {
-      const blockedTiles = new Set<string>()
-      for (const worker of renderedWorkersRef.current) {
-        if (worker.agent.id === agent.id) continue
-        const tile = toTile(worker.x, worker.y)
-        blockedTiles.add(tileKey(tile.col, tile.row))
-      }
-      for (const moving of movingWorkersRef.current) {
-        if (moving.agentId === agent.id) continue
-        blockedTiles.add(moving.destinationTile)
-      }
-      const destination = toTile(endX, endY)
-      const movement: MovingWorker = {
-        id: `${agent.id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        agentId: agent.id,
-        initials: getInitials(agent.name),
-        colorClass: hashColor(agent.name),
-        startX,
-        startY,
-        endX,
-        endY,
-        startedAt: Date.now(),
-        durationMs,
-        progress: 0,
-        ...buildPath(startX, startY, endX, endY, blockedTiles),
-        destinationTile: tileKey(destination.col, destination.row),
-      }
-      setMovingWorkers((current) => {
-        if (current.some((item) => item.agentId === agent.id)) return current
-        return [...current, movement]
+    (agent: Agent, _startX: number, _startY: number, endX: number, endY: number, durationMs = 2200) => {
+      // Skip if this agent is already moving
+      if (movingAgentIdsRef.current.has(agent.id)) return
+
+      // Set the target position — CSS transition handles the interpolation
+      setMovingAgentTargets((current) => {
+        const next = new Map(current)
+        next.set(agent.id, { x: endX, y: endY, dx: endX - _startX, dy: endY - _startY })
+        return next
       })
+      movingAgentIdsRef.current.add(agent.id)
+
+      // Clear the existing timer if any
+      const existingTimer = movingTimersRef.current.get(agent.id)
+      if (existingTimer) clearTimeout(existingTimer)
+
+      // After the transition completes, remove the target override
+      const timer = setTimeout(() => {
+        setMovingAgentTargets((current) => {
+          const next = new Map(current)
+          next.delete(agent.id)
+          return next
+        })
+        movingAgentIdsRef.current.delete(agent.id)
+        movingTimersRef.current.delete(agent.id)
+      }, durationMs)
+      movingTimersRef.current.set(agent.id, timer)
     },
     [],
   )
@@ -1133,37 +1100,6 @@ export function OfficePanel() {
   }, [currentSeatMap, displayAgents, enqueueMovement])
 
   useEffect(() => {
-    if (movingWorkers.length === 0) return
-
-    let rafId: number | null = null
-    const step = () => {
-      const now = Date.now()
-      setMovingWorkers((current) => {
-        if (current.length === 0) return current
-        const updated = current
-          .map((worker) => {
-            const linear = (now - worker.startedAt) / worker.durationMs
-            const progress = Math.max(0, Math.min(1, linear))
-            return { ...worker, progress }
-          })
-          .filter((worker) => worker.progress < 1)
-        return updated
-      })
-      rafId = window.requestAnimationFrame(step)
-    }
-
-    rafId = window.requestAnimationFrame(step)
-    return () => {
-      if (rafId != null) window.cancelAnimationFrame(rafId)
-    }
-  }, [movingWorkers.length])
-
-  useEffect(() => {
-    movingWorkersRef.current = movingWorkers
-    movingAgentIdsRef.current = new Set(movingWorkers.map((worker) => worker.agentId))
-  }, [movingWorkers])
-
-  useEffect(() => {
     renderedWorkersRef.current = renderedWorkers
   }, [renderedWorkers])
 
@@ -1176,12 +1112,126 @@ export function OfficePanel() {
     setOfficeEvents((current) => [next, ...current].slice(0, 12))
   }, [])
 
+  // SSE subscription for meeting events and position updates
+  useEffect(() => {
+    let eventSource: EventSource | null = null
+    let disposed = false
+
+    function handleMessage(event: MessageEvent) {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'meeting.started') {
+          const m = data.data
+          setActiveMeetings((current) => [
+            ...current.filter((x) => x.meeting_id !== m.meeting_id),
+            {
+              meeting_id: m.meeting_id,
+              initiator_id: m.initiator_id,
+              participant_id: m.participant_id,
+              initiator_name: m.initiator_name,
+              participant_name: m.participant_name,
+              location_x: m.location_x,
+              location_y: m.location_y,
+              status: 'walking' as const,
+              turn_count: 0,
+              max_turns: m.max_turns ?? 6,
+            },
+          ])
+          pushOfficeEvent({
+            kind: 'action',
+            severity: 'good',
+            message: `${m.initiator_name} started a meeting with ${m.participant_name}.`,
+          })
+        } else if (data.type === 'meeting.message') {
+          const m = data.data
+          // Update active meeting status/turn_count
+          setActiveMeetings((current) =>
+            current.map((mtg) =>
+              mtg.meeting_id === m.meeting_id
+                ? { ...mtg, status: 'conversing' as const, turn_count: m.turn_number }
+                : mtg
+            )
+          )
+          setMeetingSpeechBubbles((current) => {
+            const next = new Map(current)
+            next.set(m.agent_id, { agentName: m.agent_name, content: m.content, timestamp: Date.now() })
+            return next
+          })
+          const existingTimer = meetingBubbleTimersRef.current.get(m.agent_id)
+          if (existingTimer) clearTimeout(existingTimer)
+          // meeting.message only fires during active meetings — always use 30s
+          const timer = setTimeout(() => {
+            dismissBubble(m.agent_id)
+            meetingBubbleTimersRef.current.delete(m.agent_id)
+          }, 30_000)
+          meetingBubbleTimersRef.current.set(m.agent_id, timer)
+        } else if (data.type === 'meeting.concluded') {
+          const m = data.data
+          setActiveMeetings((current) => current.filter((x) => x.meeting_id !== m.meeting_id))
+          // Clear speech bubbles for both agents with exit animation
+          for (const agentId of [m.initiator_id, m.participant_id]) {
+            const timer = meetingBubbleTimersRef.current.get(agentId)
+            if (timer) { clearTimeout(timer); meetingBubbleTimersRef.current.delete(agentId) }
+            dismissBubble(agentId)
+          }
+          pushOfficeEvent({
+            kind: 'action',
+            severity: 'info',
+            message: m.summary ? `Meeting concluded: ${String(m.summary).slice(0, 80)}` : 'Meeting concluded.',
+          })
+        } else if (data.type === 'office.position.updated') {
+          const p = data.data
+          const worker = renderedWorkersRef.current.find((w) => w.agent.id === p.agent_id)
+          if (worker && typeof p.target_x === 'number' && typeof p.target_y === 'number') {
+            enqueueMovement(worker.agent, worker.x, worker.y, p.target_x, p.target_y, 2200)
+          }
+        }
+      } catch {
+        // Ignore parse errors from heartbeats etc
+      }
+    }
+
+    function connect() {
+      if (disposed) return
+      try {
+        eventSource = new EventSource('/api/events')
+        eventSource.onmessage = handleMessage
+        eventSource.onerror = () => {
+          // Browser auto-reconnects EventSource, but if it fails permanently
+          // (e.g., server returns non-2xx), readyState goes to CLOSED
+          if (eventSource?.readyState === EventSource.CLOSED && !disposed) {
+            eventSource.close()
+            // Retry after 5s
+            setTimeout(connect, 5000)
+          }
+        }
+      } catch {
+        // EventSource not available
+      }
+    }
+
+    connect()
+
+    return () => {
+      disposed = true
+      if (eventSource) eventSource.close()
+      for (const timer of meetingBubbleTimersRef.current.values()) clearTimeout(timer)
+      meetingBubbleTimersRef.current.clear()
+    }
+  }, [enqueueMovement, pushOfficeEvent, dismissBubble])
+
   useEffect(() => {
     if (!isLocalMode) return
     const interval = setInterval(() => {
       const activeMovingIds = movingAgentIdsRef.current
+      // Skip agents in active meetings (server controls their movement)
+      const meetingAgentIds = new Set<number>()
+      for (const m of activeMeetingsRef.current) {
+        meetingAgentIds.add(m.initiator_id)
+        meetingAgentIds.add(m.participant_id)
+      }
       const idleCandidates = renderedWorkersRef.current
-        .filter((worker) => worker.agent.status === 'idle' && !worker.isMoving && !activeMovingIds.has(worker.agent.id))
+        .filter((worker) => worker.agent.status === 'idle' && !worker.isMoving && !activeMovingIds.has(worker.agent.id) && !meetingAgentIds.has(worker.agent.id))
         .sort((a, b) => a.agent.name.localeCompare(b.agent.name))
         .slice(0, 2)
 
@@ -1225,15 +1275,20 @@ export function OfficePanel() {
   useEffect(() => {
     const timers = transitionTimersRef.current
     const roamTimers = roamReturnTimersRef.current
+    const moveTimers = movingTimersRef.current
     return () => {
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
       for (const timer of roamTimers.values()) clearTimeout(timer)
       roamTimers.clear()
+      for (const timer of moveTimers.values()) clearTimeout(timer)
+      moveTimers.clear()
       if (launchToastTimerRef.current) {
         clearTimeout(launchToastTimerRef.current)
         launchToastTimerRef.current = null
       }
+      for (const timer of meetingBubbleTimersRef.current.values()) clearTimeout(timer)
+      meetingBubbleTimersRef.current.clear()
     }
   }, [])
 
@@ -1559,7 +1614,12 @@ export function OfficePanel() {
           <p className="text-sm mt-1">{t('emptyDeckSubtitle')}</p>
         </div>
       ) : viewMode === 'office' ? (
-        <div className={`grid grid-cols-1 ${showSidebar ? 'xl:grid-cols-[220px_1fr]' : 'xl:grid-cols-1'} gap-4`}>
+        <div className={`grid grid-cols-1 ${
+          showSidebar && showMeetingPanel ? 'xl:grid-cols-[220px_1fr_280px]' :
+          showSidebar ? 'xl:grid-cols-[220px_1fr]' :
+          showMeetingPanel ? 'xl:grid-cols-[1fr_280px]' :
+          'xl:grid-cols-1'
+        } gap-4`}>
           {showSidebar && (
           <div className="void-panel text-foreground p-3 h-fit">
             <div className="flex items-center justify-between mb-2">
@@ -1633,7 +1693,7 @@ export function OfficePanel() {
                       : 'bg-black/20 border border-white/5 hover:bg-black/35'
                   }`}
                 >
-                  <span className={`w-6 h-6 rounded ${hashColor(agent.name)} flex items-center justify-center text-[10px] font-bold text-white`}>
+                  <span className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: getAgentColor(agent.id).bg }}>
                     {getInitials(agent.name)}
                   </span>
                   <span className="min-w-0 flex-1">
@@ -1769,6 +1829,10 @@ export function OfficePanel() {
               <Button variant="ghost" size="xs" onClick={() => setShowSidebar((v) => !v)} className="h-auto px-1.5 py-0.5 text-[10px] font-mono hover:bg-void-cyan/10">{showSidebar ? t('hideCrewButton') : t('showCrewButton')}</Button>
               <Button variant="ghost" size="xs" onClick={() => setShowMinimap((v) => !v)} className="h-auto px-1.5 py-0.5 text-[10px] font-mono hover:bg-void-cyan/10">{showMinimap ? t('hideRadarButton') : t('showRadarButton')}</Button>
               <Button variant="ghost" size="xs" onClick={() => setShowEvents((v) => !v)} className="h-auto px-1.5 py-0.5 text-[10px] font-mono hover:bg-void-cyan/10">{showEvents ? t('hideLogButton') : t('showLogButton')}</Button>
+              <Button variant="ghost" size="xs" aria-pressed={showMeetingPanel} onClick={() => setShowMeetingPanel((v) => !v)} className={`h-auto px-1.5 py-0.5 text-[10px] font-mono ${showMeetingPanel ? 'bg-void-cyan/20 text-void-cyan' : 'hover:bg-void-cyan/10'}`}>
+                {showMeetingPanel ? t('hideMeetingsButton') : t('showMeetingsButton')}
+                {activeMeetings.length > 0 && <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-void-cyan/20 text-void-cyan text-[8px]">{activeMeetings.length}</span>}
+              </Button>
               <Button variant="ghost" size="xs" onClick={resetOfficeLayout} className="h-auto px-1.5 py-0.5 text-[10px] font-mono hover:bg-void-cyan/10">{t('resetLayout')}</Button>
             </div>
 
@@ -1776,24 +1840,8 @@ export function OfficePanel() {
               className="absolute inset-0 origin-top-left"
               style={{ transform: `translate(${mapPan.x}px, ${mapPan.y}px) scale(${mapZoom})` }}
             >
-              <div className="absolute inset-0 z-0">
-                {floorTiles.map((tile) => (
-                  <div
-                    key={tile.id}
-                    className="absolute border border-void-cyan/[0.06]"
-                    style={{
-                      left: `${tile.x}%`,
-                      top: `${tile.y}%`,
-                      width: `${tile.w}%`,
-                      height: `${tile.h}%`,
-                      backgroundImage: `url('/office-sprites/kenney/floorFull.png')`,
-                      backgroundSize: '100% 100%',
-                      opacity: tile.sprite ? themePalette.floorOpacityA : themePalette.floorOpacityB,
-                      filter: themePalette.floorFilter,
-                    }}
-                  />
-                ))}
-              </div>
+              <div className="absolute inset-0 z-0" style={floorStyle} />
+              <div className="absolute inset-0 z-0 pointer-events-none" style={floorCheckerboardStyle} />
 
               {/* Corridor base */}
               <div className="absolute left-[14%] top-[45%] w-[72%] h-[6%] border-y border-void-cyan/15 shadow-[0_0_30px_hsl(var(--void-cyan)/0.1)]" style={{ backgroundColor: themePalette.corridor }} />
@@ -1916,11 +1964,21 @@ export function OfficePanel() {
                 ))}
               </svg>
 
-              {renderedWorkers.map(({ agent, x, y, zoneLabel, seatLabel, isMoving, direction }) => (
-                <div key={agent.id}>
+              {renderedWorkers.map(({ agent, x, y, zoneLabel, seatLabel, isMoving, direction }) => {
+                const moveTx = 'left 2200ms cubic-bezier(0.33, 1, 0.68, 1), top 2200ms cubic-bezier(0.33, 1, 0.68, 1)'
+                return (
+                <div
+                  key={agent.id}
+                  onMouseEnter={() => setHoveredAgentId(agent.id)}
+                  onMouseLeave={() => setHoveredAgentId(null)}
+                  style={{
+                    opacity: meetingAgentIds.has(agent.id) || agent.status === 'busy' ? 1 : 0.45,
+                    transition: 'opacity 300ms ease',
+                  }}
+                >
                   <div
                     className="absolute -translate-x-1/2 pointer-events-none"
-                    style={{ left: `${x}%`, top: `calc(${y}% - 14px)` }}
+                    style={{ left: `${x}%`, top: `calc(${y}% - 14px)`, transition: moveTx }}
                   >
                     <Image
                       src="/office-sprites/kenney/chairDesk.png"
@@ -1936,7 +1994,7 @@ export function OfficePanel() {
                   </div>
                   <div
                     className="absolute -translate-x-1/2 pointer-events-none"
-                    style={{ left: `${x}%`, top: `calc(${y}% - 56px)` }}
+                    style={{ left: `${x}%`, top: `calc(${y}% - 56px)`, transition: moveTx }}
                   >
                     <div className="relative w-16 h-9">
                       <Image
@@ -1967,12 +2025,13 @@ export function OfficePanel() {
                   <Button
                     variant="ghost"
                     onClick={() => setSelectedAgent(agent)}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-500 hover:scale-110 h-auto p-0 rounded-none hover:bg-transparent"
-                    style={{ left: `${x}%`, top: `${y}%` }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 hover:scale-110 h-auto p-0 rounded-none hover:bg-transparent"
+                    style={{ left: `${x}%`, top: `${y}%`, transition: `${moveTx}, transform 500ms ease` }}
                   >
-                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 border border-white/10 text-white text-[11px] px-2 py-0.5 shadow-[0_0_12px_rgba(0,0,0,0.4)]">
+                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 border text-white text-[11px] px-2 py-0.5 shadow-[0_0_12px_rgba(0,0,0,0.4)]" style={{ borderColor: `hsl(${getAgentColor(agent.id).hue}, 70%, 55%, 0.5)` }}>
                       <span className={`inline-block w-2 h-2 rounded-full ${statusDot[agent.status]} mr-1`} />
                       {agent.name}
+                      {meetingAgentIds.has(agent.id) && <span className="ml-1 text-[9px] text-void-cyan">{t('meetingBadge')}</span>}
                     </div>
                     <div className="absolute -top-12 left-1/2 -translate-x-1/2 text-sm">
                       <span className={`${agent.status === 'busy' ? 'animate-bounce' : 'animate-pulse'}`}>{getStatusEmote(agent.status)}</span>
@@ -1996,7 +2055,7 @@ export function OfficePanel() {
                           transformOrigin: 'center',
                         }}
                       />
-                      <div className={`absolute left-[8px] top-[14px] w-4 h-3 ${hashColor(agent.name)} border border-black/60`} />
+                      <div className="absolute left-[8px] top-[14px] w-4 h-3 border border-black/60" style={{ backgroundColor: getAgentColor(agent.id).bg }} />
                     </div>
                     {!isMoving && <div className="text-[9px] text-slate-300 font-mono mt-0.5">#{seatLabel}</div>}
                   </Button>
@@ -2004,7 +2063,7 @@ export function OfficePanel() {
                   {agentActionOverrides.has(agent.id) && (
                     <div
                       className="absolute -translate-x-1/2 text-[9px] px-1.5 py-0.5 rounded bg-black/70 border border-white/15 text-cyan-200"
-                      style={{ left: `${x}%`, top: `calc(${y}% - 24px)` }}
+                      style={{ left: `${x}%`, top: `calc(${y}% - 24px)`, transition: moveTx }}
                     >
                       {agentActionOverrides.get(agent.id)}
                     </div>
@@ -2013,7 +2072,7 @@ export function OfficePanel() {
                   {(transitioningAgentIds.has(agent.id) || isMoving) && (
                     <div
                       className="absolute -translate-x-1/2 text-[9px] text-slate-200/85 font-medium px-1.5 py-0.5 rounded bg-black/45 border border-white/10"
-                      style={{ left: `${x}%`, top: `calc(${y}% + 22px)` }}
+                      style={{ left: `${x}%`, top: `calc(${y}% + 22px)`, transition: moveTx }}
                     >
                       {t('moving')}
                     </div>
@@ -2021,12 +2080,89 @@ export function OfficePanel() {
 
                   <div
                     className="absolute text-[9px] text-slate-500/70 font-mono pointer-events-none"
-                    style={{ left: `${x}%`, top: `calc(${y}% + 38px)` }}
+                    style={{ left: `${x}%`, top: `calc(${y}% + 38px)`, transition: moveTx }}
                   >
                     {zoneLabel}
                   </div>
+
+                  {hoveredAgentId === agent.id && (
+                    <div
+                      className="absolute -translate-x-1/2 pointer-events-none z-50 animate-in fade-in duration-150"
+                      style={{ left: `${x}%`, top: `calc(${y}% - 56px)`, transition: moveTx }}
+                    >
+                      <div className="bg-slate-900/95 border border-slate-600/50 rounded-lg px-2.5 py-1.5 text-[10px] text-slate-200 leading-tight shadow-lg min-w-[120px]">
+                        <div className="font-semibold text-[10px] mb-0.5" style={{ color: getAgentColor(agent.id).accent }}>{agent.name}</div>
+                        <div className="text-[9px] text-slate-400">{agent.role || 'Agent'}</div>
+                        <div className="flex items-center gap-1 mt-0.5 text-[9px]">
+                          <span className={`w-1.5 h-1.5 rounded-full ${agent.status === 'idle' ? 'bg-green-400' : agent.status === 'busy' ? 'bg-yellow-400' : agent.status === 'error' ? 'bg-red-400' : 'bg-gray-400'}`} />
+                          <span className="text-slate-300 capitalize">{agent.status}</span>
+                        </div>
+                        {activeMeetings.some(m => m.initiator_id === agent.id || m.participant_id === agent.id) && (() => {
+                          const mtg = activeMeetings.find(m => m.initiator_id === agent.id || m.participant_id === agent.id)!
+                          const partner = mtg.initiator_id === agent.id ? mtg.participant_name : mtg.initiator_name
+                          return (
+                            <div className="mt-1 pt-1 border-t border-slate-700/50 text-[9px] text-slate-400">
+                              Meeting with {partner.split(/[\s_-]/)[0]} ({mtg.turn_count}/{mtg.max_turns})
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {meetingSpeechBubbles.has(agent.id) && (
+                    <div
+                      className={`absolute -translate-x-1/2 pointer-events-none z-40 ${dismissingBubbles.has(agent.id) ? 'opacity-0 -translate-y-2' : 'animate-in fade-in slide-in-from-bottom-2 duration-300'}`}
+                      style={{ left: `${x}%`, top: `calc(${y}% - 80px)`, transition: dismissingBubbles.has(agent.id) ? `opacity 300ms ease, transform 300ms ease, ${moveTx}` : moveTx }}
+                    >
+                      <div className="max-w-[180px] rounded-lg bg-slate-900/95 border px-2.5 py-1.5 text-[10px] text-slate-100 leading-tight" style={{ borderColor: getAgentColor(agent.id).border, boxShadow: `0 0 16px hsl(${getAgentColor(agent.id).hue}, 70%, 45%, 0.15)` }}>
+                        <div className="font-medium text-[9px] mb-0.5" style={{ color: getAgentColor(agent.id).accent }}>{meetingSpeechBubbles.get(agent.id)!.agentName}</div>
+                        <div>{String(meetingSpeechBubbles.get(agent.id)!.content).slice(0, 120)}{String(meetingSpeechBubbles.get(agent.id)!.content).length > 120 ? '...' : ''}</div>
+                      </div>
+                      <div className="w-2 h-2 bg-slate-900/95 border-r border-b rotate-45 mx-auto -mt-1" style={{ borderColor: getAgentColor(agent.id).border }} />
+                    </div>
+                  )}
                 </div>
-              ))}
+                )
+              })}
+
+              {activeMeetings.map((meeting) => {
+                const borderClass = meeting.status === 'walking' ? 'border-void-amber/50' : 'border-void-cyan/50'
+                const bgClass = meeting.status === 'walking' ? 'bg-void-amber/10' : 'bg-void-cyan/10'
+                return (
+                  <div
+                    key={`meeting-${meeting.meeting_id}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
+                    style={{ left: `${meeting.location_x}%`, top: `${meeting.location_y}%` }}
+                  >
+                    <div className="relative flex flex-col items-center">
+                      {/* Turn counter above when conversing */}
+                      {meeting.status === 'conversing' && (
+                        <div className="mb-1 text-[9px] font-mono text-void-cyan/70">
+                          {t('meetingTurnProgress', { current: meeting.turn_count, max: meeting.max_turns })}
+                        </div>
+                      )}
+                      {/* Dual initials */}
+                      <div className="flex -space-x-1">
+                        <div className={`w-7 h-7 rounded-full border-2 ${borderClass} ${bgClass} animate-pulse flex items-center justify-center`}>
+                          <span className={`text-[9px] font-bold ${meeting.status === 'walking' ? 'text-void-amber/80' : 'text-void-cyan/80'}`}>
+                            {getInitials(meeting.initiator_name)}
+                          </span>
+                        </div>
+                        <div className={`w-7 h-7 rounded-full border-2 ${borderClass} ${bgClass} animate-pulse flex items-center justify-center`}>
+                          <span className={`text-[9px] font-bold ${meeting.status === 'walking' ? 'text-void-amber/80' : 'text-void-cyan/80'}`}>
+                            {getInitials(meeting.participant_name)}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Status label below */}
+                      <div className={`mt-1 whitespace-nowrap text-[8px] font-mono ${meeting.status === 'walking' ? 'text-void-amber/60' : 'text-void-cyan/60'}`}>
+                        {meeting.status === 'walking' ? t('meetingWalking') : t('meetingConversing')}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
 
             {showMinimap && (
@@ -2056,8 +2192,8 @@ export function OfficePanel() {
                   <Button
                     key={`mini-worker-${worker.agent.id}`}
                     variant="ghost"
-                    className={`absolute w-2.5 h-2.5 rounded-full -translate-x-1/2 -translate-y-1/2 ${hashColor(worker.agent.name)} border border-black/40 h-auto p-0 min-w-0 hover:bg-transparent`}
-                    style={{ left: `${worker.x}%`, top: `${worker.y}%` }}
+                    className="absolute w-2.5 h-2.5 rounded-full -translate-x-1/2 -translate-y-1/2 border border-black/40 h-auto p-0 min-w-0 hover:bg-transparent"
+                    style={{ left: `${worker.x}%`, top: `${worker.y}%`, backgroundColor: getAgentColor(worker.agent.id).bg, transition: 'left 2200ms cubic-bezier(0.33, 1, 0.68, 1), top 2200ms cubic-bezier(0.33, 1, 0.68, 1)' }}
                     onClick={(event) => {
                       event.stopPropagation()
                       setSelectedAgent(worker.agent)
@@ -2137,6 +2273,19 @@ export function OfficePanel() {
             </div>
             )}
           </div>
+
+          <div
+            className="transition-all duration-400"
+            style={{
+              transform: showMeetingPanel ? 'translateX(0)' : 'translateX(100%)',
+              opacity: showMeetingPanel ? 1 : 0,
+              pointerEvents: showMeetingPanel ? 'auto' : 'none',
+              transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+              transitionDuration: '400ms',
+            }}
+          >
+            <MeetingPanel activeMeetings={activeMeetings} speechBubbles={meetingSpeechBubbles} />
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -2190,7 +2339,7 @@ export function OfficePanel() {
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all hover:scale-[1.02] ${statusGlow[agent.status]}`}
                     style={{ background: 'var(--card)' }}
                   >
-                    <div className={`w-8 h-8 rounded-full ${hashColor(agent.name)} flex items-center justify-center text-white font-bold text-xs`}>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs" style={{ backgroundColor: getAgentColor(agent.id).bg }}>
                       {getInitials(agent.name)}
                     </div>
                     <div>
@@ -2213,7 +2362,7 @@ export function OfficePanel() {
           <div className="bg-card border border-border rounded-lg max-w-sm w-full p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-3">
-                <div className={`w-14 h-14 rounded-full ${hashColor(selectedAgent.name)} flex items-center justify-center text-white font-bold text-lg ring-2 ring-offset-2 ring-offset-card ${selectedAgent.status === 'busy' ? 'ring-yellow-500' : selectedAgent.status === 'idle' ? 'ring-green-500' : selectedAgent.status === 'error' ? 'ring-red-500' : 'ring-gray-600'}`}>
+                <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg ring-2 ring-offset-2 ring-offset-card ${selectedAgent.status === 'busy' ? 'ring-yellow-500' : selectedAgent.status === 'idle' ? 'ring-green-500' : selectedAgent.status === 'error' ? 'ring-red-500' : 'ring-gray-600'}`} style={{ backgroundColor: getAgentColor(selectedAgent.id).bg }}>
                   {getInitials(selectedAgent.name)}
                 </div>
                 <div>

@@ -17,6 +17,7 @@ const KNOWN_ENDPOINTS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   ollama: 'http://localhost:11434/v1',
   groq: 'https://api.groq.com/openai/v1',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
 }
 
 interface OpenAIMessage {

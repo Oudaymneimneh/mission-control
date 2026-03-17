@@ -1262,6 +1262,66 @@ const migrations: Migration[] = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_gateway_health_logs_gateway_id ON gateway_health_logs(gateway_id)`)
       db.exec(`CREATE INDEX IF NOT EXISTS idx_gateway_health_logs_probed_at ON gateway_health_logs(probed_at)`)
     }
+  },
+  {
+    id: '042_agent_meetings',
+    up(db: Database.Database) {
+      // Meeting lifecycle tracking
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_meetings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id INTEGER NOT NULL,
+          initiator_id INTEGER NOT NULL REFERENCES agents(id),
+          participant_id INTEGER NOT NULL REFERENCES agents(id),
+          status TEXT NOT NULL DEFAULT 'seeking',
+          topic TEXT,
+          summary TEXT,
+          location_x INTEGER DEFAULT 0,
+          location_y INTEGER DEFAULT 0,
+          started_at INTEGER,
+          concluded_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+        )
+      `)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_meetings_workspace_id ON agent_meetings(workspace_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_meetings_initiator_id ON agent_meetings(initiator_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_meetings_participant_id ON agent_meetings(participant_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_meetings_status ON agent_meetings(status)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_meetings_created_at ON agent_meetings(created_at)`)
+
+      // Meeting conversation messages
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          meeting_id INTEGER NOT NULL REFERENCES agent_meetings(id),
+          agent_id INTEGER NOT NULL REFERENCES agents(id),
+          content TEXT NOT NULL,
+          turn_number INTEGER NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_meeting_messages_meeting_id ON meeting_messages(meeting_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_meeting_messages_agent_id ON meeting_messages(agent_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_meeting_messages_turn_number ON meeting_messages(turn_number)`)
+
+      // Server-authoritative agent office positions
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_office_positions (
+          agent_id INTEGER PRIMARY KEY REFERENCES agents(id),
+          workspace_id INTEGER NOT NULL,
+          x INTEGER NOT NULL DEFAULT 0,
+          y INTEGER NOT NULL DEFAULT 0,
+          target_x INTEGER,
+          target_y INTEGER,
+          zone TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+        )
+      `)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_office_positions_workspace_id ON agent_office_positions(workspace_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_office_positions_updated_at ON agent_office_positions(updated_at)`)
+    }
   }
 ]
 

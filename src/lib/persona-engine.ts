@@ -173,12 +173,14 @@ export function buildSystemPrompt(agent: {
 
     if (persona.personality) {
       const { traits, big_five } = persona.personality
-      if (traits.length > 0) {
+      if (traits && traits.length > 0) {
         personaLines.push(`Personality traits: ${traits.join(', ')}`)
       }
-      personaLines.push(
-        `Big Five profile: O=${big_five.openness.toFixed(1)} C=${big_five.conscientiousness.toFixed(1)} E=${big_five.extraversion.toFixed(1)} A=${big_five.agreeableness.toFixed(1)} N=${big_five.neuroticism.toFixed(1)}`
-      )
+      if (big_five) {
+        personaLines.push(
+          `Big Five profile: O=${big_five.openness.toFixed(1)} C=${big_five.conscientiousness.toFixed(1)} E=${big_five.extraversion.toFixed(1)} A=${big_five.agreeableness.toFixed(1)} N=${big_five.neuroticism.toFixed(1)}`
+        )
+      }
     }
 
     if (persona.skills && persona.skills.length > 0) {
@@ -640,4 +642,41 @@ export function buildReinjectablePrompt(
 
   const bf = persona.personality.big_five
   return `[PERSONA REINFORCEMENT — Turn ${turnCount}]\nRemember your core personality: O=${bf.openness.toFixed(1)} C=${bf.conscientiousness.toFixed(1)} E=${bf.extraversion.toFixed(1)} A=${bf.agreeableness.toFixed(1)} N=${bf.neuroticism.toFixed(1)}\nStay consistent with your assigned traits and behavioral patterns.\n\n${base}`
+}
+
+export function suggestCollaborators(
+  db: Database,
+  agentId: number,
+  workspaceId: number,
+  limit = 5,
+): Array<{ agent_id: number; name: string; role: string; trust_score: number; interaction_count: number }> {
+  const trustEdges = db.prepare(`
+    SELECT target_agent_id, trust_score, interaction_count
+    FROM agent_pairwise_trust
+    WHERE source_agent_id = ? AND workspace_id = ?
+      AND interaction_count >= 2
+    ORDER BY trust_score DESC
+    LIMIT ?
+  `).all(agentId, workspaceId, limit) as Array<{ target_agent_id: number; trust_score: number; interaction_count: number }>
+
+  if (trustEdges.length === 0) return []
+
+  const ids = trustEdges.map(e => e.target_agent_id)
+  const placeholders = ids.map(() => '?').join(',')
+  const agents = db.prepare(`SELECT id, name, role, status FROM agents WHERE id IN (${placeholders})`).all(...ids) as Array<{ id: number; name: string; role: string; status: string }>
+  const agentMap = new Map(agents.map(a => [a.id, a]))
+
+  return trustEdges
+    .map(edge => {
+      const agent = agentMap.get(edge.target_agent_id)
+      if (!agent) return null
+      return {
+        agent_id: edge.target_agent_id,
+        name: agent.name,
+        role: agent.role,
+        trust_score: edge.trust_score,
+        interaction_count: edge.interaction_count,
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
 }

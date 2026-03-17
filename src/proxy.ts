@@ -183,6 +183,12 @@ export function proxy(request: NextRequest) {
 
   // API routes: accept session cookie OR API key
   if (pathname.startsWith('/api/')) {
+    // Local dev mode: skip proxy auth (route-level auth still applies via MC_DISABLE_AUTH)
+    if (process.env.MC_DISABLE_AUTH === '1' || process.env.NODE_ENV !== 'production') {
+      const { response, nonce } = nextResponseWithNonce(request)
+      return addSecurityHeaders(response, request, nonce)
+    }
+
     const configuredApiKey = (process.env.API_KEY || '').trim()
     const apiKey = extractApiKeyFromRequest(request)
     const hasValidApiKey = Boolean(configuredApiKey && apiKey && safeCompare(apiKey, configuredApiKey))

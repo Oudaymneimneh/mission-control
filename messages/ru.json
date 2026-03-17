@@ -600,6 +600,8 @@
     "recurring": "ПОВТОРЯЮЩАЯСЯ",
     "spawned": "СОЗДАНА",
     "spawnedFromTask": "Создана из задачи #{id}",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "Не назначено",
     "due": "Срок:",
     "dropTasksHere": "Перетащите задачи сюда",

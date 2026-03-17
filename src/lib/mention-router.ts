@@ -45,15 +45,15 @@ export function routeMentions(
       // Create notification for workspace admin(s)
       try {
         const adminUser = db.prepare(
-          "SELECT id FROM users WHERE workspace_id = ? AND role = 'admin' ORDER BY id ASC LIMIT 1"
-        ).get(workspaceId) as { id: number } | undefined
-        const targetUserId = adminUser?.id ?? 1
+          "SELECT username FROM users WHERE workspace_id = ? AND role = 'admin' ORDER BY id ASC LIMIT 1"
+        ).get(workspaceId) as { username: string } | undefined
+        const recipientName = adminUser?.username ?? 'admin'
 
         db.prepare(`
-          INSERT INTO notifications (user_id, type, title, message, workspace_id)
+          INSERT INTO notifications (recipient, type, title, message, workspace_id)
           VALUES (?, 'mention', ?, ?, ?)
         `).run(
-          targetUserId,
+          recipientName,
           `@human mention from ${fromAgent}`,
           content.slice(0, 200),
           workspaceId

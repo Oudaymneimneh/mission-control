@@ -119,6 +119,8 @@ export interface Task {
   github_branch?: string
   github_pr_number?: number
   github_pr_state?: string
+  source_type?: string
+  source_id?: number
 }
 
 export interface Agent {

@@ -600,6 +600,8 @@
     "recurring": "반복",
     "spawned": "생성됨",
     "spawnedFromTask": "작업 #{id}에서 생성됨",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "미할당",
     "due": "마감:",
     "dropTasksHere": "여기에 작업 드롭",

@@ -837,6 +837,8 @@
     "recurring": "循环",
     "spawned": "已生成",
     "spawnedFromTask": "从任务 #{id} 生成",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "未分配",
     "due": "截止：",
     "dropTasksHere": "拖放任务至此",

@@ -317,6 +317,7 @@ export async function respondToMention(
 
   // CHAT-04: Race LLM against 5-second timeout
   let responseText: string
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   try {
     const llmPromise = complete(
       [
@@ -329,9 +330,9 @@ export async function respondToMention(
       { agentId: agent.id, workspaceId: agent.workspace_id, taskType: 'conversation' }
     )
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('mention_timeout')), MENTION_RESPONSE_TIMEOUT_MS)
-    )
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error('mention_timeout')), MENTION_RESPONSE_TIMEOUT_MS)
+    })
 
     const response = await Promise.race([llmPromise, timeoutPromise])
     responseText = response.text.trim()
@@ -342,6 +343,8 @@ export async function respondToMention(
     } else {
       throw err
     }
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
   }
 
   // Insert response message

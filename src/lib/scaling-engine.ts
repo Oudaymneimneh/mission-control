@@ -6,6 +6,7 @@
  */
 
 import type Database from 'better-sqlite3'
+import { writeTransaction } from './db'
 import { eventBus } from '@/lib/event-bus'
 import { logger } from '@/lib/logger'
 
@@ -128,12 +129,21 @@ export function evaluateScaling(
     return null // still in cooldown
   }
 
+  // Prevent double scaling — skip if a pending event already exists for this policy
+  const pendingEvent = db.prepare(
+    `SELECT id FROM scaling_events WHERE policy_id = ? AND status = 'pending' LIMIT 1`
+  ).get(policyId) as { id: number } | undefined
+
+  if (pendingEvent) {
+    return null // another evaluation already created a pending event
+  }
+
   const metrics = getScalingMetrics(db, workspaceId)
   const globalCap = getGlobalAgentCap()
 
-  // Count all agents (including offline) for global cap
+  // Count active agents (exclude offline) for global cap
   const totalAgents = (db.prepare(
-    'SELECT COUNT(*) as count FROM agents WHERE workspace_id = ?'
+    "SELECT COUNT(*) as count FROM agents WHERE workspace_id = ? AND status != 'offline'"
   ).get(workspaceId) as { count: number }).count
 
   eventBus.broadcast('scaling.evaluation.triggered', {
@@ -195,17 +205,20 @@ export function executeScaleUp(
   const now = Math.floor(Date.now() / 1000)
   const agentName = `auto-agent-${now}-${Math.random().toString(36).slice(2, 6)}`
 
-  const result = db.prepare(
-    `INSERT INTO agents (name, role, status, config, workspace_id, created_at, updated_at)
-     VALUES (?, ?, 'idle', ?, ?, ?, ?)`
-  ).run(agentName, template ?? 'auto-scaled', template ? JSON.stringify({ template }) : '{}', workspaceId, now, now)
+  const agentId = writeTransaction(db, (txDb) => {
+    const result = txDb.prepare(
+      `INSERT INTO agents (name, role, status, config, workspace_id, created_at, updated_at)
+       VALUES (?, ?, 'idle', ?, ?, ?, ?)`
+    ).run(agentName, template ?? 'auto-scaled', template ? JSON.stringify({ template }) : '{}', workspaceId, now, now)
 
-  const agentId = Number(result.lastInsertRowid)
+    const newAgentId = Number(result.lastInsertRowid)
 
-  // Update event
-  db.prepare(
-    `UPDATE scaling_events SET status = 'completed', agent_id = ?, resolved_at = ? WHERE id = ?`
-  ).run(agentId, now, eventId)
+    txDb.prepare(
+      `UPDATE scaling_events SET status = 'completed', agent_id = ?, resolved_at = ? WHERE id = ?`
+    ).run(newAgentId, now, eventId)
+
+    return newAgentId
+  })
 
   eventBus.broadcast('scaling.hire.approved', {
     requestId: String(eventId),
@@ -228,21 +241,44 @@ export function executeScaleDown(
 ): void {
   const now = Math.floor(Date.now() / 1000)
 
-  db.prepare(
-    `UPDATE agents SET status = 'offline', updated_at = ? WHERE id = ? AND workspace_id = ?`
-  ).run(now, agentId, workspaceId)
+  const wasRetired = writeTransaction(db, (txDb) => {
+    // SCAL-06: Check for in-progress work before retiring
+    const busyTask = txDb.prepare(
+      `SELECT id FROM tasks
+       WHERE assigned_to = (SELECT name FROM agents WHERE id = ?)
+         AND status IN ('assigned', 'in_progress')
+         AND workspace_id = ?
+       LIMIT 1`
+    ).get(agentId, workspaceId) as { id: number } | undefined
 
-  db.prepare(
-    `UPDATE scaling_events SET status = 'completed', resolved_at = ? WHERE id = ?`
-  ).run(now, eventId)
+    if (busyTask) {
+      // Agent has in-progress work — reject the scale-down
+      txDb.prepare(
+        `UPDATE scaling_events SET status = 'rejected', reason = reason || ' [rejected: agent has in-progress tasks]', resolved_at = ? WHERE id = ?`
+      ).run(now, eventId)
+      logger.info({ eventId, agentId, taskId: busyTask.id }, 'Scale-down rejected — agent has in-progress work')
+      return false
+    }
 
-  eventBus.broadcast('scaling.retire.initiated', {
-    agentId,
-    reason: 'idle_timeout',
-    idleDuration: 0,
+    txDb.prepare(
+      `UPDATE agents SET status = 'offline', updated_at = ? WHERE id = ? AND workspace_id = ?`
+    ).run(now, agentId, workspaceId)
+
+    txDb.prepare(
+      `UPDATE scaling_events SET status = 'completed', resolved_at = ? WHERE id = ?`
+    ).run(now, eventId)
+
+    return true
   })
 
-  logger.info({ eventId, agentId }, 'Scale-down executed')
+  if (wasRetired) {
+    eventBus.broadcast('scaling.retire.initiated', {
+      agentId,
+      reason: 'idle_timeout',
+      idleDuration: 0,
+    })
+    logger.info({ eventId, agentId }, 'Scale-down executed')
+  }
 }
 
 // --- Internal Helpers ---

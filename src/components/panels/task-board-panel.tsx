@@ -44,6 +44,8 @@ interface Task {
   github_branch?: string
   github_pr_number?: number
   github_pr_state?: string
+  source_type?: string
+  source_id?: number
 }
 
 interface Agent {
@@ -882,6 +884,14 @@ export function TaskBoardPanel() {
                               Aegis
                             </span>
                           )}
+                          {task.source_type === 'meeting' && task.source_id && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400 font-mono"
+                              title={`Created from meeting #${task.source_id}`}
+                            >
+                              {t('meetingSource')}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1241,7 +1251,15 @@ function TaskDetailModal({
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="task-detail-title" className="bg-card border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex justify-between items-start mb-4">
-            <h3 id="task-detail-title" className="text-xl font-bold text-foreground">{task.title}</h3>
+            <div>
+              <h3 id="task-detail-title" className="text-xl font-bold text-foreground">{task.title}</h3>
+              {task.source_type === 'meeting' && task.source_id && (
+                <span className="inline-flex items-center gap-1 mt-1 text-xs text-violet-400">
+                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 5a1 1 0 100 2 1 1 0 000-2zm5 0a1 1 0 100 2 1 1 0 000-2zM4.5 9.5a.5.5 0 01.5-.5h6a.5.5 0 010 1H5a.5.5 0 01-.5-.5z"/></svg>
+                  {t('meetingSourceDetail', { id: task.source_id })}
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button variant="ghost" size="sm" onClick={() => onEdit(task)} className="text-primary hover:bg-primary/20">
                 {t('edit')}

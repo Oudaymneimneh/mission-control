@@ -600,6 +600,8 @@
     "recurring": "定期",
     "spawned": "生成済み",
     "spawnedFromTask": "タスク #{id}から生成",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "未割り当て",
     "due": "期限：",
     "dropTasksHere": "タスクをここにドロップ",

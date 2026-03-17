@@ -119,52 +119,65 @@ export function submitArgument(
   content: string,
   confidence: number
 ): { id: number; budgetRemaining: number } {
-  const debate = db.prepare('SELECT * FROM debates WHERE id = ?').get(debateId) as DebateRow | undefined
-  if (!debate) throw new Error('Debate not found')
+  const result = writeTransaction(db, (txDb) => {
+    const debate = txDb.prepare('SELECT * FROM debates WHERE id = ?').get(debateId) as DebateRow | undefined
+    if (!debate) throw new Error('Debate not found')
 
-  const validPhases = ['propose', 'critique', 'rebut']
-  if (!validPhases.includes(debate.status)) {
-    throw new Error(`Cannot submit argument in ${debate.status} phase`)
-  }
+    const validPhases = ['propose', 'critique', 'rebut']
+    if (!validPhases.includes(debate.status)) {
+      throw new Error(`Cannot submit argument in ${debate.status} phase`)
+    }
 
-  // Check participant
-  const participant = db.prepare(
-    'SELECT agent_name FROM debate_participants WHERE debate_id = ? AND agent_id = ?'
-  ).get(debateId, agentId) as { agent_name: string } | undefined
-  if (!participant) throw new Error('Agent is not a participant in this debate')
+    // Check participant
+    const participant = txDb.prepare(
+      'SELECT agent_name FROM debate_participants WHERE debate_id = ? AND agent_id = ?'
+    ).get(debateId, agentId) as { agent_name: string } | undefined
+    if (!participant) throw new Error('Agent is not a participant in this debate')
 
-  // Check if already submitted for this round+phase
-  const existing = db.prepare(
-    'SELECT id FROM debate_arguments WHERE debate_id = ? AND agent_id = ? AND round_number = ? AND phase = ?'
-  ).get(debateId, agentId, debate.current_round, debate.status)
-  if (existing) throw new Error('Agent already submitted argument for this round and phase')
+    // Check if already submitted for this round+phase
+    const existing = txDb.prepare(
+      'SELECT id FROM debate_arguments WHERE debate_id = ? AND agent_id = ? AND round_number = ? AND phase = ?'
+    ).get(debateId, agentId, debate.current_round, debate.status)
+    if (existing) throw new Error('Agent already submitted argument for this round and phase')
 
-  // Check token budget
-  const tokens = estimateTokens(content)
-  if (debate.tokens_used + tokens > debate.token_budget) {
-    db.prepare('UPDATE debates SET status = ?, concluded_at = unixepoch() WHERE id = ?')
-      .run('budget_exhausted', debateId)
+    // Check token budget — if exceeded, mark as exhausted and commit (don't throw inside tx)
+    const tokens = estimateTokens(content)
+    if (debate.tokens_used + tokens > debate.token_budget) {
+      txDb.prepare('UPDATE debates SET status = ?, concluded_at = unixepoch() WHERE id = ?')
+        .run('budget_exhausted', debateId)
+      return { budgetExhausted: true as const, debateId }
+    }
+
+    const insertResult = txDb.prepare(`
+      INSERT INTO debate_arguments (debate_id, agent_id, agent_name, round_number, phase, content, confidence, tokens_used)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(debateId, agentId, participant.agent_name, debate.current_round, debate.status, content, confidence, tokens)
+
+    txDb.prepare('UPDATE debates SET tokens_used = tokens_used + ? WHERE id = ?').run(tokens, debateId)
+
+    return {
+      budgetExhausted: false as const,
+      id: Number(insertResult.lastInsertRowid),
+      budgetRemaining: debate.token_budget - debate.tokens_used - tokens,
+      agentName: participant.agent_name,
+      roundNumber: debate.current_round,
+    }
+  })
+
+  // Budget exhausted — status update committed, now throw for caller
+  if (result.budgetExhausted) {
     throw new Error('Token budget exhausted')
   }
 
-  const result = db.prepare(`
-    INSERT INTO debate_arguments (debate_id, agent_id, agent_name, round_number, phase, content, confidence, tokens_used)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(debateId, agentId, participant.agent_name, debate.current_round, debate.status, content, confidence, tokens)
-
-  db.prepare('UPDATE debates SET tokens_used = tokens_used + ? WHERE id = ?').run(tokens, debateId)
-
-  const argId = Number(result.lastInsertRowid)
-
   eventBus.broadcast('debate.argument.submitted', {
     debateId,
-    agentName: participant.agent_name,
-    roundNumber: debate.current_round,
+    agentName: result.agentName,
+    roundNumber: result.roundNumber,
   })
 
   return {
-    id: argId,
-    budgetRemaining: debate.token_budget - debate.tokens_used - tokens,
+    id: result.id,
+    budgetRemaining: result.budgetRemaining,
   }
 }
 
@@ -191,7 +204,9 @@ export function advanceDebatePhase(
 
   // Advance to next phase in sequence
   const nextPhase = PHASE_ORDER[currentPhaseIdx + 1]
-  db.prepare('UPDATE debates SET status = ? WHERE id = ?').run(nextPhase, debateId)
+  writeTransaction(db, (txDb) => {
+    txDb.prepare('UPDATE debates SET status = ? WHERE id = ?').run(nextPhase, debateId)
+  })
 
   eventBus.broadcast('debate.round.started', {
     debateId,
@@ -202,71 +217,76 @@ export function advanceDebatePhase(
   return { status: nextPhase, round: debate.current_round, phase: nextPhase }
 }
 
+type TallyResult =
+  | { kind: 'concluded'; outcome: string; round: number; accept: number; reject: number }
+  | { kind: 'next_round'; nextRound: number; previousRound: number }
+
 function tallyAndAdvance(
   db: Database,
   debate: DebateRow
 ): { status: string; round: number; phase?: string } {
-  const votes = db.prepare(
-    'SELECT vote FROM debate_votes WHERE debate_id = ?'
-  ).all(debate.id) as Array<{ vote: string }>
+  const result = writeTransaction(db, (txDb): TallyResult => {
+    const votes = txDb.prepare(
+      'SELECT vote FROM debate_votes WHERE debate_id = ?'
+    ).all(debate.id) as Array<{ vote: string }>
 
-  const accept = votes.filter(v => v.vote === 'accept').length
-  const reject = votes.filter(v => v.vote === 'reject').length
-  const total = accept + reject
+    const accept = votes.filter(v => v.vote === 'accept').length
+    const reject = votes.filter(v => v.vote === 'reject').length
+    const total = accept + reject
 
-  // Update vote counts
-  db.prepare('UPDATE debates SET vote_accept = ?, vote_reject = ? WHERE id = ?')
-    .run(accept, reject, debate.id)
+    // Update vote counts
+    txDb.prepare('UPDATE debates SET vote_accept = ?, vote_reject = ? WHERE id = ?')
+      .run(accept, reject, debate.id)
 
-  // Consensus: majority accepts (>50%)
-  if (total > 0 && accept > total / 2) {
-    db.prepare('UPDATE debates SET status = ?, outcome = ?, concluded_at = unixepoch() WHERE id = ?')
-      .run('concluded', 'accepted', debate.id)
+    // Consensus: majority accepts (>50%)
+    if (total > 0 && accept > total / 2) {
+      txDb.prepare('UPDATE debates SET status = ?, outcome = ?, concluded_at = unixepoch() WHERE id = ?')
+        .run('concluded', 'accepted', debate.id)
+      return { kind: 'concluded', outcome: 'accepted', round: debate.current_round, accept, reject }
+    }
 
+    // Max rounds reached
+    if (debate.current_round >= debate.max_rounds) {
+      const outcome = reject > accept ? 'rejected' : 'no_consensus'
+      txDb.prepare('UPDATE debates SET status = ?, outcome = ?, concluded_at = unixepoch() WHERE id = ?')
+        .run('concluded', outcome, debate.id)
+      return { kind: 'concluded', outcome, round: debate.current_round, accept, reject }
+    }
+
+    // Advance to next round
+    const nextRound = debate.current_round + 1
+    txDb.prepare('UPDATE debates SET status = ?, current_round = ? WHERE id = ?')
+      .run('propose', nextRound, debate.id)
+
+    // Clear votes for new round
+    txDb.prepare('DELETE FROM debate_votes WHERE debate_id = ?').run(debate.id)
+
+    return { kind: 'next_round', nextRound, previousRound: debate.current_round }
+  })
+
+  // Broadcast after transaction commits
+  if (result.kind === 'concluded') {
     eventBus.broadcast('debate.concluded', {
       debateId: debate.id,
-      outcome: 'accepted',
-      voteCount: { accept, reject },
+      outcome: result.outcome,
+      voteCount: { accept: result.accept, reject: result.reject },
     })
-
-    return { status: 'concluded', round: debate.current_round }
+    return { status: 'concluded', round: result.round }
   }
 
-  // Max rounds reached
-  if (debate.current_round >= debate.max_rounds) {
-    const outcome = reject > accept ? 'rejected' : 'no_consensus'
-    db.prepare('UPDATE debates SET status = ?, outcome = ?, concluded_at = unixepoch() WHERE id = ?')
-      .run('concluded', outcome, debate.id)
-
-    eventBus.broadcast('debate.concluded', {
-      debateId: debate.id,
-      outcome,
-      voteCount: { accept, reject },
-    })
-
-    return { status: 'concluded', round: debate.current_round }
-  }
-
-  // Advance to next round
-  const nextRound = debate.current_round + 1
-  db.prepare('UPDATE debates SET status = ?, current_round = ? WHERE id = ?')
-    .run('propose', nextRound, debate.id)
-
-  // Clear votes for new round
-  db.prepare('DELETE FROM debate_votes WHERE debate_id = ?').run(debate.id)
-
+  // Next round
   eventBus.broadcast('debate.round.completed', {
     debateId: debate.id,
-    roundNumber: debate.current_round,
+    roundNumber: result.previousRound,
   })
 
   eventBus.broadcast('debate.round.started', {
     debateId: debate.id,
-    roundNumber: nextRound,
+    roundNumber: result.nextRound,
     phase: 'propose',
   })
 
-  return { status: 'propose', round: nextRound, phase: 'propose' }
+  return { status: 'propose', round: result.nextRound, phase: 'propose' }
 }
 
 export function castVote(
@@ -284,6 +304,12 @@ export function castVote(
     'SELECT agent_name FROM debate_participants WHERE debate_id = ? AND agent_id = ?'
   ).get(debateId, agentId) as { agent_name: string } | undefined
   if (!participant) throw new Error('Agent is not a participant')
+
+  // Check for duplicate vote
+  const existingVote = db.prepare(
+    'SELECT id FROM debate_votes WHERE debate_id = ? AND agent_id = ?'
+  ).get(debateId, agentId)
+  if (existingVote) throw new Error('Agent has already voted in this round')
 
   db.prepare(`
     INSERT INTO debate_votes (debate_id, agent_id, agent_name, vote, reason)

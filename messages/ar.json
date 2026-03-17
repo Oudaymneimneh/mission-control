@@ -600,6 +600,8 @@
     "recurring": "متكرر",
     "spawned": "مُنشأ",
     "spawnedFromTask": "مُنشأ من المهمة #{id}",
+    "meetingSource": "MEETING",
+    "meetingSourceDetail": "Created from meeting #{id}",
     "unassigned": "غير مُخصّص",
     "due": "الاستحقاق:",
     "dropTasksHere": "اسحب المهام هنا",

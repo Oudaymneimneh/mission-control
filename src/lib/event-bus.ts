@@ -67,6 +67,16 @@ export interface EventDataMap {
   'scaling.hire.requested': { requestId: string; taskType: string; reason: string }
   'scaling.hire.approved': { requestId: string; agentId: number; templateName: string }
   'scaling.retire.initiated': { agentId: number; reason: string; idleDuration: number }
+
+  // Meeting events
+  'meeting.scheduled': { meeting_id: number; workspace_id: number; initiator_id: number; participant_id: number; initiator_name: string; participant_name: string; topic: string | null; scheduled_for: number | null }
+  'meeting.started': { meeting_id: number; workspace_id: number; initiator_id: number; participant_id: number; initiator_name: string; participant_name: string; location_x: number; location_y: number; max_turns: number }
+  'meeting.actions_created': { meeting_id: number; workspace_id: number; actions: Array<{ title: string; assignee_name: string }> }
+  'meeting.message': { meeting_id: number; workspace_id: number; agent_id: number; agent_name: string; content: string; turn_number: number }
+  'meeting.concluded': { meeting_id: number; workspace_id: number; initiator_id: number; participant_id: number; summary: string }
+
+  // Office position events
+  'office.position.updated': { workspace_id: number; agent_id: number; target_x: number; target_y: number }
 }
 
 export type EventType = keyof EventDataMap
