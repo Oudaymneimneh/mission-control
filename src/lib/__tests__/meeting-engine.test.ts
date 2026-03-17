@@ -55,6 +55,7 @@ import {
 import { eventBus } from '@/lib/event-bus'
 import { complete } from '@/lib/llm/router'
 import { observe } from '@/lib/agent-memory'
+import { getPairwiseTrust, updatePairwiseTrust } from '@/lib/persona-engine'
 
 // --- Mock DB helper ---
 
@@ -1173,6 +1174,314 @@ describe('meeting-engine', () => {
         expect(maxTurns).toBeGreaterThanOrEqual(4)
         expect(maxTurns).toBeLessThanOrEqual(8)
       }
+    })
+  })
+
+  // --- MTST-01: State machine transitions ---
+
+  describe('state machine transitions', () => {
+    it('createMeeting sets status to walking', () => {
+      const db = createMockDb()
+      db._when('SELECT x, y FROM agent_office_positions', {
+        get: vi.fn()
+          .mockReturnValueOnce({ x: 30, y: 40 })
+          .mockReturnValueOnce({ x: 50, y: 60 }),
+      })
+      db._when('INSERT INTO agent_meetings', { run: vi.fn().mockReturnValue({ lastInsertRowid: 1 }) })
+      db._when('SELECT agent_id FROM agent_office_positions', { get: vi.fn().mockReturnValue({ agent_id: 1 }) })
+      db._when('UPDATE agent_office_positions', { run: vi.fn() })
+      db._when('SELECT * FROM agent_meetings WHERE id', {
+        get: vi.fn().mockReturnValue({
+          id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+          status: 'walking', location_x: 40, location_y: 50, max_turns: 6,
+        }),
+      })
+
+      const meeting = createMeeting(db as any, agentA, agentB)
+      expect(meeting.status).toBe('walking')
+    })
+
+    it('generateMeetingTurn keeps status as conversing', async () => {
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'test', summary: null,
+        location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+      }
+
+      db._when('agents WHERE id', {
+        get: vi.fn()
+          .mockReturnValueOnce(agentA)
+          .mockReturnValueOnce(agentB),
+      })
+      db._when('meeting_messages mm', { all: vi.fn().mockReturnValue([]) })
+      db._when('INSERT INTO meeting_messages', { run: vi.fn() })
+      db._when('UPDATE agent_meetings SET turn_count', { run: vi.fn() })
+      db._when('UPDATE agent_meetings SET topic', { run: vi.fn() })
+
+      const result = await generateMeetingTurn(db as any, meeting)
+      expect(result).toBe(true)
+      // Status is not changed to anything else — still conversing
+      // The only updates are turn_count and topic, NOT status
+      expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("SET status"))
+    })
+
+    it('summarizeMeeting sets status to concluded', async () => {
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'test', summary: null,
+        location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+      }
+
+      const statusRunMock = vi.fn()
+      db._when("SET status = ?", { run: statusRunMock })
+      db._when('meeting_messages mm', {
+        all: vi.fn().mockReturnValue([
+          { content: 'Hello', agent_name: 'Atlas' },
+          { content: 'Hi there', agent_name: 'Nova' },
+        ]),
+      })
+      db._when('agents WHERE id', { get: vi.fn().mockReturnValue(agentA) })
+      const concludeRunMock = vi.fn()
+      db._when("status = 'concluded'", { run: concludeRunMock })
+      db._when('agent_pairwise_trust', { run: vi.fn(), get: vi.fn().mockReturnValue({ trust_score: 0.5, interaction_count: 0, last_interaction_at: null }) })
+      db._when('SET target_x = NULL', { run: vi.fn() })
+
+      await summarizeMeeting(db as any, meeting)
+
+      // Phase 1: transitions to 'summarizing'
+      expect(statusRunMock).toHaveBeenCalledWith('summarizing', meeting.id)
+      // Phase 3: transitions to 'concluded'
+      expect(concludeRunMock).toHaveBeenCalled()
+    })
+
+    it('canInitiateMeeting returns false when agent is busy', () => {
+      const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'busy' }) })
+
+      expect(canInitiateMeeting(db as any, 1, 1)).toBe(false)
+    })
+
+    it('canInitiateMeeting returns false during cooldown period', () => {
+      const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
+      // Last concluded 30 seconds ago — cooldown is 60s
+      const recentTime = Math.floor(Date.now() / 1000) - 30
+      db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue({ concluded_at: recentTime }) })
+
+      expect(canInitiateMeeting(db as any, 1, 1)).toBe(false)
+    })
+
+    it('canInitiateMeeting returns false when concurrent meeting limit reached', () => {
+      const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
+      db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue(undefined) })
+      db._when('SELECT id FROM agent_meetings', { get: vi.fn().mockReturnValue(undefined) })
+      // MAX_CONCURRENT_MEETINGS is 2
+      db._when('SELECT COUNT(*) as cnt FROM agent_meetings', { get: vi.fn().mockReturnValue({ cnt: 2 }) })
+
+      expect(canInitiateMeeting(db as any, 1, 1)).toBe(false)
+    })
+
+    it('canInitiateMeeting returns true when no cooldown and under limit', () => {
+      const db = createMockDb()
+      db._when('SELECT status FROM agents WHERE id', { get: vi.fn().mockReturnValue({ status: 'idle' }) })
+      // No cooldown (no concluded meetings)
+      db._when('ORDER BY concluded_at', { get: vi.fn().mockReturnValue(undefined) })
+      // No active meeting
+      db._when('SELECT id FROM agent_meetings', { get: vi.fn().mockReturnValue(undefined) })
+      // Under concurrent limit
+      db._when('SELECT COUNT(*) as cnt FROM agent_meetings', { get: vi.fn().mockReturnValue({ cnt: 1 }) })
+
+      expect(canInitiateMeeting(db as any, 1, 1)).toBe(true)
+    })
+  })
+
+  // --- MTST-02: Partner selection scoring ---
+
+  describe('partner selection scoring', () => {
+    it('scorePartner returns positive score for compatible agents', () => {
+      const db = createMockDb()
+      db._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+      const score = scorePartner(db as any, agentA, agentB, null, null)
+      expect(score).toBeGreaterThan(0)
+      spy.mockRestore()
+    })
+
+    it('scorePartner weights trust factor highest (0.3)', () => {
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+      // High trust (1.0) scenario
+      vi.mocked(getPairwiseTrust).mockReturnValueOnce({ trust_score: 1.0, interaction_count: 5, last_interaction_at: 100 })
+      const db1 = createMockDb()
+      db1._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      const highTrustScore = scorePartner(db1 as any, agentA, agentB, null, null)
+
+      // Low trust (0.0) scenario
+      vi.mocked(getPairwiseTrust).mockReturnValueOnce({ trust_score: 0.0, interaction_count: 0, last_interaction_at: null })
+      const db2 = createMockDb()
+      db2._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      const lowTrustScore = scorePartner(db2 as any, agentA, agentB, null, null)
+
+      // Trust difference: (1.0 - 0.0) * 0.3 = 0.3
+      const diff = highTrustScore - lowTrustScore
+      expect(diff).toBeCloseTo(0.3, 2)
+
+      spy.mockRestore()
+    })
+
+    it('proximity score decreases with distance', () => {
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+      const nearPos = { agent_id: 2, workspace_id: 1, x: 32, y: 42, target_x: null, target_y: null, zone: 'eng', updated_at: 0 }
+      const farPos = { agent_id: 2, workspace_id: 1, x: 100, y: 100, target_x: null, target_y: null, zone: 'far', updated_at: 0 }
+      const initPos = { agent_id: 1, workspace_id: 1, x: 30, y: 40, target_x: null, target_y: null, zone: 'eng', updated_at: 0 }
+
+      const db1 = createMockDb()
+      db1._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      const nearScore = scorePartner(db1 as any, agentA, agentB, initPos, nearPos)
+
+      const db2 = createMockDb()
+      db2._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      const farScore = scorePartner(db2 as any, agentA, agentB, initPos, farPos)
+
+      expect(nearScore).toBeGreaterThan(farScore)
+
+      spy.mockRestore()
+    })
+
+    it('novelty score decreases with recent meeting count', () => {
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+      // No recent meetings — high novelty
+      const db1 = createMockDb()
+      db1._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+      const freshScore = scorePartner(db1 as any, agentA, agentB, null, null)
+
+      // 3 recent meetings — low novelty (novelty = max(0, 1 - 3*0.3) = 0.1)
+      const db2 = createMockDb()
+      db2._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 3 }) })
+      const staleScore = scorePartner(db2 as any, agentA, agentB, null, null)
+
+      // Novelty diff: (1.0 - 0.1) * 0.2 = 0.18
+      expect(freshScore).toBeGreaterThan(staleScore)
+
+      spy.mockRestore()
+    })
+
+    it('selectPartner returns null when no idle candidates', () => {
+      const db = createMockDb()
+      db._when('FROM agents', { all: vi.fn().mockReturnValue([]) })
+
+      expect(selectPartner(db as any, agentA)).toBeNull()
+    })
+
+    it('selectPartner excludes agents in active meetings', () => {
+      const db = createMockDb()
+      // Two idle candidates
+      const agentC = { ...agentB, id: 4, name: 'Charlie' }
+      db._when('FROM agents', { all: vi.fn().mockReturnValue([agentB, agentC]) })
+      // agentB (id=2) is in an active meeting, agentC (id=4) is free
+      db._when("status IN ('walking', 'conversing', 'summarizing')", {
+        all: vi.fn().mockReturnValue([{ initiator_id: 2, participant_id: 3 }]),
+      })
+      // getWorkspacePositions
+      db._when('agent_office_positions WHERE workspace_id', { all: vi.fn().mockReturnValue([]) })
+      // scorePartner: COUNT(*)
+      db._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+      const result = selectPartner(db as any, agentA)
+      expect(result).not.toBeNull()
+      // agentB excluded (id=2 in busy set), only agentC (id=4) available
+      expect(result!.partner.id).toBe(4)
+      spy.mockRestore()
+    })
+
+    it('selectPartner handles agent with no personality config', () => {
+      const db = createMockDb()
+      const noConfigAgent = { id: 5, name: 'NullConfig', role: 'assistant', status: 'idle', soul_content: null, config: null, workspace_id: 1 }
+      db._when('FROM agents', { all: vi.fn().mockReturnValue([noConfigAgent]) })
+      db._when("status IN ('walking', 'conversing', 'summarizing')", { all: vi.fn().mockReturnValue([]) })
+      db._when('agent_office_positions WHERE workspace_id', { all: vi.fn().mockReturnValue([]) })
+      db._when('COUNT(*)', { get: vi.fn().mockReturnValue({ cnt: 0 }) })
+
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+      const result = selectPartner(db as any, agentA)
+      expect(result).not.toBeNull()
+      expect(result!.partner.id).toBe(5)
+      expect(result!.score).toBeGreaterThan(0)
+      spy.mockRestore()
+    })
+  })
+
+  // --- MTST-03: Trust score updates ---
+
+  describe('trust score updates', () => {
+    it('updatePairwiseTrust is called during meeting conclusion', async () => {
+      vi.mocked(updatePairwiseTrust).mockClear()
+
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'test', summary: null,
+        location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+      }
+
+      db._when("SET status = ?", { run: vi.fn() })
+      db._when('meeting_messages mm', {
+        all: vi.fn().mockReturnValue([
+          { content: 'Hello', agent_name: 'Atlas' },
+          { content: 'Hi there', agent_name: 'Nova' },
+        ]),
+      })
+      db._when('agents WHERE id', { get: vi.fn().mockReturnValue(agentA) })
+      db._when("status = 'concluded'", { run: vi.fn() })
+      db._when('agent_pairwise_trust', { run: vi.fn(), get: vi.fn().mockReturnValue({ trust_score: 0.5, interaction_count: 0, last_interaction_at: null }) })
+      db._when('SET target_x = NULL', { run: vi.fn() })
+
+      await summarizeMeeting(db as any, meeting)
+
+      expect(updatePairwiseTrust).toHaveBeenCalled()
+    })
+
+    it('trust updates happen for both initiator and participant', async () => {
+      vi.mocked(updatePairwiseTrust).mockClear()
+
+      const db = createMockDb()
+      const meeting = {
+        id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
+        status: 'conversing' as const, topic: 'test', summary: null,
+        location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100,
+      }
+
+      db._when("SET status = ?", { run: vi.fn() })
+      db._when('meeting_messages mm', {
+        all: vi.fn().mockReturnValue([
+          { content: 'Hello', agent_name: 'Atlas' },
+          { content: 'Hi there', agent_name: 'Nova' },
+        ]),
+      })
+      db._when('agents WHERE id', { get: vi.fn().mockReturnValue(agentA) })
+      db._when("status = 'concluded'", { run: vi.fn() })
+      db._when('agent_pairwise_trust', { run: vi.fn(), get: vi.fn().mockReturnValue({ trust_score: 0.5, interaction_count: 0, last_interaction_at: null }) })
+      db._when('SET target_x = NULL', { run: vi.fn() })
+
+      await summarizeMeeting(db as any, meeting)
+
+      // updatePairwiseTrust called twice: once for initiator→participant, once for participant→initiator
+      expect(updatePairwiseTrust).toHaveBeenCalledTimes(2)
+      // First call: initiator (1) → participant (2) with delta 0.05
+      expect(updatePairwiseTrust).toHaveBeenCalledWith(expect.anything(), 1, 2, 0.05, 1)
+      // Second call: participant (2) → initiator (1) with delta 0.05
+      expect(updatePairwiseTrust).toHaveBeenCalledWith(expect.anything(), 2, 1, 0.05, 1)
     })
   })
 })
