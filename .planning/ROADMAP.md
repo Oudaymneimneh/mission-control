@@ -2,145 +2,185 @@
 
 ## Overview
 
-Transform Mission Control from a monitoring dashboard into an AI agent orchestration platform across 8 phases. Starting with foundation hardening (store split, SQLite concurrency, error boundaries), then building spatial visualization, workflow engine, team chat, debate rooms, persona simulation, and auto-scaling — each phase extending proven existing infrastructure. Final phase integrates all 6 systems with cross-cutting quality validation.
+Mission Control development across two milestones. v1.0 (Phases 1-8) transformed MC from monitoring dashboard into orchestration platform with 6 major capabilities. v2.1 (Phases 9-15) completes the meeting system with production features, polishes office canvas visual quality, and achieves comprehensive meeting test coverage.
+
+## Milestones
+
+- ✅ **v1.0 MVP** — Phases 1-8 (shipped 2026-03-15)
+- ✅ **v2.0 Meeting Engine + Hardening** — (shipped 2026-03-16)
+- 🚧 **v2.1 Meeting Engine Polish** — Phases 9-15 (in progress)
 
 ## Phases
 
-- [ ] **Phase 1: Foundation** - Split Zustand store, harden SQLite concurrency, add error boundaries, install dagre, extend EventBus
-- [ ] **Phase 2: Spatial Visualization** - Interactive @xyflow/react canvas with agent nodes, relationship edges, dagre auto-layout, SSE-driven updates
-- [ ] **Phase 3: Workflow Engine** - SOP templates with sequential phase execution, Zod artifact validation, human approval gates
-- [ ] **Phase 4: Team Chat** - @mention routing (@agent, @all, @team), auto-response, team CRUD, autocomplete, loop prevention
-- [ ] **Phase 5: Debate/Consensus** - Structured deliberation rooms with propose/critique/rebut/vote rounds, token budgets, argument trees
-- [ ] **Phase 6: Persona Simulation** - OCEAN traits, PAD emotional model, cognitive biases, trust scores, persona drift prevention
-- [ ] **Phase 7: Auto-Scaling** - Scaling policies, lazy queue evaluation, template-based spawning, human approval gate, global cap
-- [ ] **Phase 8: Integration & Polish** - Cross-system SSE wiring, animated message flow, E2E validation, quality gate enforcement
+<details>
+<summary>✅ v1.0 MVP (Phases 1-8) — SHIPPED 2026-03-15</summary>
+
+- [x] **Phase 1: Foundation** — Zustand split, SQLite hardening, error boundaries, dagre, EventBus
+- [x] **Phase 2: Spatial Visualization** — @xyflow/react canvas, dagre layout, SSE updates, message flow
+- [x] **Phase 3: Workflow Engine** — SOP templates, phase execution, artifact validation, approval gates
+- [x] **Phase 4: Team Chat** — @mention routing, @all, @team:name, loop prevention
+- [x] **Phase 5: Debate/Consensus** — Structured rounds, voting, token budgets, argument trees
+- [x] **Phase 6: Persona Simulation** — Big Five, PAD emotional model, cognitive biases, trust scores
+- [x] **Phase 7: Auto-Scaling** — Lazy evaluation, cooldown, template spawning, global caps
+- [x] **Phase 8: Integration & Polish** — Cross-system SSE, quality gate validation
+
+</details>
+
+### 🚧 v2.1 Meeting Engine Polish
+
+- [ ] **Phase 9: Visual Foundation** — Performance + color identity system
+- [ ] **Phase 10: Visual Polish** — Speech bubbles, tooltips, panel animations
+- [ ] **Phase 11: Meeting Engine Core** — Task creation + meeting scheduling
+- [ ] **Phase 12: Meeting Intelligence** — Collaborator suggestions + analytics dashboard
+- [ ] **Phase 13: Meeting Quality Scoring** — LLM-evaluated conversation quality
+- [ ] **Phase 14: Trust Network Graph** — Force-directed SVG visualization
+- [ ] **Phase 15: Meeting Test Coverage** — Unit, integration, and E2E test layers
 
 ## Phase Details
 
+<details>
+<summary>✅ v1.0 Phase Details (Phases 1-8)</summary>
+
 ### Phase 1: Foundation
-**Goal**: Clean architectural base that prevents cascading failures across all 6 new features
-**Depends on**: Nothing (first phase)
-**Requirements**: FNDN-01, FNDN-02, FNDN-03, FNDN-04, FNDN-05, FNDN-06, FNDN-07
-**Success Criteria** (what must be TRUE):
-  1. Zustand store split into domain slices — changing agent state does NOT re-render workflow/debate panels
-  2. `global-error.tsx` catches root layout errors and displays recovery UI with `<html>` and `<body>` tags
-  3. SQLite concurrent writes (3+ simultaneous) complete without SQLITE_BUSY errors
-  4. `useCanvasStore` exists as separate Zustand store for React Flow state
-  5. Legacy `reactflow` package removed, `@xyflow/react` is sole spatial library
-**Research**: Unlikely (Zustand store splitting and error boundaries are well-documented patterns)
-**Plans**: TBD
+**Goal**: Clean architectural base — Zustand split, SQLite hardening, error boundaries
+**Requirements**: FNDN-01 through FNDN-07 | **Status**: Complete
 
 ### Phase 2: Spatial Visualization
-**Goal**: Interactive agent canvas with real-time status updates and hierarchical auto-layout
-**Depends on**: Phase 1
-**Requirements**: SPAT-01, SPAT-02, SPAT-03, SPAT-04, SPAT-05, SPAT-06, SPAT-07, SPAT-08, SPAT-09, SPAT-10
-**Success Criteria** (what must be TRUE):
-  1. Agent nodes render on canvas with name and status badge, updated in real-time via SSE
-  2. Relationship edges show delegation, communication, and supervision links between agents
-  3. Dagre auto-layout positions agents in hierarchical topology without manual placement
-  4. User can drag nodes to reposition; positions persist across page refresh
-  5. Canvas renders 50+ agent nodes without frame drops below 30fps
-**Research**: Unlikely (React Flow documentation has complete examples for custom nodes, dagre layout, and Zustand integration)
-**Plans**: TBD
+**Goal**: Interactive @xyflow/react canvas with agent nodes, dagre layout, SSE updates
+**Requirements**: SPAT-01 through SPAT-10 | **Status**: Complete
 
 ### Phase 3: Workflow Engine
-**Goal**: SOP templates with sequential phase execution, artifact validation, and human approval gates
-**Depends on**: Phase 1
-**Requirements**: WKFL-01, WKFL-02, WKFL-03, WKFL-04, WKFL-05, WKFL-06, WKFL-07, WKFL-08, WKFL-09, WKFL-10
-**Success Criteria** (what must be TRUE):
-  1. User can create SOP workflow template with named phases, assigned agent roles, and input/output schemas
-  2. Workflow run advances phases sequentially — current phase completes, next phase starts automatically
-  3. Phase transitions validate output artifacts against Zod schema; reject transition on validation failure
-  4. Human approval gates pause workflow until admin approves
-  5. 10-phase SOPs with artifact validation between each phase execute to completion
-**Research**: Unlikely (extends existing sop-engine.ts with established state machine patterns)
-**Plans**: TBD
+**Goal**: SOP templates, sequential phases, artifact validation, approval gates
+**Requirements**: WKFL-01 through WKFL-10 | **Status**: Complete
 
 ### Phase 4: Team Chat
-**Goal**: Human-agent shared chat with @mention routing, team addressing, and loop prevention
-**Depends on**: Phase 1
-**Requirements**: CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05, CHAT-06, CHAT-07, CHAT-08, CHAT-09
-**Success Criteria** (what must be TRUE):
-  1. Messages containing `@agent_name` route to named agent and receive auto-response within 5 seconds
-  2. `@all` broadcasts to every active agent; `@team:name` routes to team members
-  3. Teams can be created and managed (CRUD) with agent membership
-  4. Chat input provides @mention autocomplete showing available agents and teams
-  5. Per-thread turn limit (max 3 agent-to-agent exchanges) prevents routing loops
-**Research**: Unlikely (@mention parsing is a solved problem; existing mentions.ts already handles most of the work)
-**Plans**: TBD
+**Goal**: @mention routing, @all, @team:name, auto-response, loop prevention
+**Requirements**: CHAT-01 through CHAT-09 | **Status**: Complete
 
 ### Phase 5: Debate/Consensus
-**Goal**: Structured multi-agent deliberation with voting, token budgets, and argument tree visualization
-**Depends on**: Phase 4 (debate messages route through chat infrastructure)
-**Requirements**: DEBT-01, DEBT-02, DEBT-03, DEBT-04, DEBT-05, DEBT-06, DEBT-07, DEBT-08, DEBT-09, DEBT-10
-**Success Criteria** (what must be TRUE):
-  1. User can create debate session with topic, participant agents, and max rounds
-  2. Debate follows structured phases: propose, critique, rebut, vote — with majority determining outcome
-  3. Hard per-debate token budget enforced before each LLM call; debate pauses on budget exhaustion
-  4. Argument tree viewable as threaded conversation (argument, responses)
-  5. 5+ agent participants complete structured rounds without deadlock
-**Research**: Likely (complex protocol design)
-**Research topics**: AutoGen solver/aggregator debate pattern, S2-MAD token reduction techniques, sliding context window implementation, deadlock prevention in multi-agent round-robin
-**Plans**: TBD
+**Goal**: Structured rounds, voting, token budgets, argument trees
+**Requirements**: DEBT-01 through DEBT-10 | **Status**: Complete
 
 ### Phase 6: Persona Simulation
-**Goal**: Deep personality modeling with emotional state, cognitive biases, and inter-agent trust dynamics
-**Depends on**: Phase 1 (extends existing persona-engine.ts)
-**Requirements**: PRSA-01, PRSA-02, PRSA-03, PRSA-04, PRSA-05, PRSA-06, PRSA-07, PRSA-08, PRSA-09
-**Success Criteria** (what must be TRUE):
-  1. Each agent has configurable OCEAN traits (5-point discrete scale) with 4+ persona presets
-  2. PAD emotional model (pleasure/arousal/dominance) tracks agent emotional state with exponential decay toward baseline
-  3. 8 cognitive biases activate based on trait-based thresholds
-  4. Pairwise trust scores between agents update after each interaction
-  5. Persona re-injection every 5 turns prevents drift beyond 1 standard deviation over 20-turn conversations
-**Research**: Likely (emotional model adaptation)
-**Research topics**: TinyTroupe Big Five → PAD mapping in TypeScript, emotional decay functions, cognitive bias activation formulas, persona drift measurement methodology
-**Plans**: TBD
+**Goal**: OCEAN traits, PAD emotional model, cognitive biases, trust scores
+**Requirements**: PRSA-01 through PRSA-09 | **Status**: Complete
 
 ### Phase 7: Auto-Scaling
-**Goal**: Template-based agent spawning with lazy queue evaluation, human approval, and global safety caps
-**Depends on**: Phase 3 (workflow engine creates task queues that scaling monitors)
-**Requirements**: SCAL-01, SCAL-02, SCAL-03, SCAL-04, SCAL-05, SCAL-06, SCAL-07, SCAL-08, SCAL-09, SCAL-10
-**Success Criteria** (what must be TRUE):
-  1. Scaling policies define min/max agents, queue depth thresholds, and cooldown periods
-  2. Auto-scaler evaluates queue depth lazily on request access (no setInterval) and spawns matching agent template
-  3. Human approval gate requires admin confirmation before agent spawn (configurable to auto-approve)
-  4. Scale-down retires idle agents gracefully after completing current work
-  5. Global agent cap (default 20) prevents runaway spawning; responds within 30 seconds of threshold breach
-**Research**: Likely (no open-source precedent)
-**Research topics**: KEDA event-driven autoscaling formulas, Amazon SQS scaling math for threshold tuning, idle detection heuristics, graceful agent retirement protocol
-**Plans**: TBD
+**Goal**: Lazy queue evaluation, template spawning, approval gates, global caps
+**Requirements**: SCAL-01 through SCAL-10 | **Status**: Complete
 
 ### Phase 8: Integration & Polish
-**Goal**: Cross-system wiring, animated message flow on spatial canvas, and comprehensive quality validation
-**Depends on**: Phases 2-7 (all features must exist before integration)
-**Requirements**: QUAL-01, QUAL-02, QUAL-03, QUAL-04, QUAL-05, QUAL-06
+**Goal**: Cross-system SSE wiring, quality gate validation
+**Requirements**: QUAL-01 through QUAL-06 | **Status**: Complete
+
+</details>
+
+### Phase 9: Visual Foundation
+**Goal**: Establish rendering performance and per-agent color identity across the office canvas
+**Depends on**: Nothing (first v2.1 phase)
+**Requirements**: VIZQ-01, VIZQ-05, VIZQ-09, VIZQ-10
 **Success Criteria** (what must be TRUE):
-  1. All 6 features have unit tests with >60% coverage and E2E specs covering CRUD lifecycle + error cases
-  2. Zero increase in TypeScript `any` usage — all new code uses proper types
-  3. No regression in existing 870 tests — all pass after integration
-  4. All new API routes follow existing pattern: requireRole() → validateBody() → getDatabase() → NextResponse.json()
-  5. Cross-system SSE events wire all 6 features together (workflow → spatial updates, debate → chat messages, scaling → spatial node additions)
-**Research**: Unlikely (internal patterns and integration testing)
+  1. Each agent renders with a unique, consistent color across desk marker, speech bubble, name label, and canvas indicator
+  2. Agent movement on canvas uses CSS transitions with zero requestAnimationFrame calls
+  3. Office canvas floor renders with a single CSS background-image repeat (not 384 individual DOM nodes)
+  4. Idle agents display at reduced opacity compared to active/meeting agents, updating via SSE
+**Research**: Unlikely (CSS transitions, internal patterns)
+**Plans**: TBD
+
+### Phase 10: Visual Polish
+**Goal**: Add animation polish and interactive disclosure to the office canvas
+**Depends on**: Phase 9 (uses color system)
+**Requirements**: VIZQ-02, VIZQ-03, VIZQ-04, VIZQ-06
+**Success Criteria** (what must be TRUE):
+  1. Speech bubbles display with dark theme (dark background, light text) matching the application palette
+  2. Speech bubbles fade/slide out smoothly when conversations end instead of instant removal
+  3. Meeting detail panel opens/closes with spring-physics CSS transitions
+  4. Hovering any agent on the office canvas reveals a tooltip with name, role, status, and active meeting
+**Research**: Unlikely (CSS animations, internal UI work)
+**Plans**: TBD
+
+### Phase 11: Meeting Engine Core
+**Goal**: Meetings produce actionable tasks and can be triggered on schedule
+**Depends on**: Nothing (independent of visual work)
+**Requirements**: MEET-01, MEET-02, MEET-05, MEET-06
+**Success Criteria** (what must be TRUE):
+  1. After a meeting concludes, a task appears in the task board with meeting topic as title and outcome summary as description
+  2. Meeting-created tasks include a clickable reference back to the source meeting
+  3. Meetings can be scheduled at configurable recurring intervals per agent
+  4. Scheduled meetings skip agents that are currently busy or in another meeting
+**Research**: Unlikely (extends existing meeting engine and task system)
+**Plans**: TBD
+
+### Phase 12: Meeting Intelligence
+**Goal**: Surface who agents should meet with and visualize meeting patterns
+**Depends on**: Phase 11 (needs meeting data for analytics)
+**Requirements**: MEET-03, MEET-04, MEET-07, MEET-08
+**Success Criteria** (what must be TRUE):
+  1. Collaborator suggestions panel displays top-5 partners ranked by 5-factor selection with score breakdown
+  2. Collaborator suggestion scores refresh after each meeting with latest trust data
+  3. Meeting analytics page shows frequency trends over time via a recharts chart
+  4. Per-agent meeting stats (count, average duration, trust delta) are visible on the analytics page
+**Research**: Likely (recharts integration for time-series analytics)
+**Research topics**: recharts API for time-series/bar charts, existing recharts usage in project, data aggregation queries
+**Plans**: TBD
+
+### Phase 13: Meeting Quality Scoring
+**Goal**: Evaluate meeting conversations via LLM and surface quality metrics
+**Depends on**: Phase 11 (needs meeting transcripts)
+**Requirements**: MEET-09, MEET-10
+**Success Criteria** (what must be TRUE):
+  1. Each completed meeting has an LLM-generated quality score (0.0-1.0) stored in the database
+  2. Quality scores are visible in both the meeting history list and individual meeting detail view
+**Research**: Likely (LLM prompt engineering for evaluation)
+**Research topics**: Quality scoring prompt design, evaluation rubric criteria, existing LLM router usage patterns
+**Plans**: TBD
+
+### Phase 14: Trust Network Graph
+**Goal**: Visualize pairwise trust relationships as an interactive force-directed graph
+**Depends on**: Phase 9 (uses agent color system)
+**Requirements**: VIZQ-07, VIZQ-08
+**Success Criteria** (what must be TRUE):
+  1. Trust network renders as a pure SVG graph with agent nodes connected by trust-weighted edges (thickness/opacity proportional to score)
+  2. Force-directed layout stabilizes within 2 seconds for 20 agents
+**Research**: Likely (force-directed graph algorithm without D3)
+**Research topics**: Force simulation algorithm (Verlet integration), SVG rendering for dynamic layouts, performance tuning for 20+ nodes
+**Plans**: TBD
+
+### Phase 15: Meeting Test Coverage
+**Goal**: Comprehensive test coverage across all 3 layers for the meeting system
+**Depends on**: Phases 9-14 (tests validate all features)
+**Requirements**: MTST-01, MTST-02, MTST-03, MTST-04, MTST-05, MTST-06, MTST-07, MTST-08
+**Success Criteria** (what must be TRUE):
+  1. Unit tests cover meeting state machine transitions, 5-factor partner selection, and trust score update logic
+  2. Integration tests verify conversation flow and quality scoring using recorded LLM responses (no live API calls)
+  3. E2E tests verify SSE meeting events, panel rendering, and canvas marker position updates
+  4. All new tests pass alongside existing 1191 unit + 760 E2E tests with zero regressions
+**Research**: Unlikely (vitest + playwright patterns well-established)
 **Plans**: TBD
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
-Note: Phases 2, 3, 4, and 6 all depend only on Phase 1, enabling parallel planning.
+**v2.1 Execution Order:** 9 → 10 → 11 → 12 → 13 → 14 → 15
+**Parallelizable:** Phases 12, 13, 14 can run in parallel (all depend on 9/11 but not each other)
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Foundation | 5/5 | Complete | 2026-03-15 |
-| 2. Spatial Visualization | 5/5 | Complete | 2026-03-15 |
-| 3. Workflow Engine | 4/4 | Complete | 2026-03-15 |
-| 4. Team Chat | 4/4 | Complete | 2026-03-15 |
-| 5. Debate/Consensus | 4/4 | Complete | 2026-03-15 |
-| 6. Persona Simulation | 3/3 | Complete | 2026-03-15 |
-| 7. Auto-Scaling | 3/3 | Complete | 2026-03-15 |
-| 8. Integration & Polish | 2/2 | Complete | 2026-03-15 |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|---------------|--------|-----------|
+| 1. Foundation | v1.0 | 5/5 | Complete | 2026-03-15 |
+| 2. Spatial Visualization | v1.0 | 5/5 | Complete | 2026-03-15 |
+| 3. Workflow Engine | v1.0 | 4/4 | Complete | 2026-03-15 |
+| 4. Team Chat | v1.0 | 4/4 | Complete | 2026-03-15 |
+| 5. Debate/Consensus | v1.0 | 4/4 | Complete | 2026-03-15 |
+| 6. Persona Simulation | v1.0 | 3/3 | Complete | 2026-03-15 |
+| 7. Auto-Scaling | v1.0 | 3/3 | Complete | 2026-03-15 |
+| 8. Integration & Polish | v1.0 | 2/2 | Complete | 2026-03-15 |
+| 9. Visual Foundation | v2.1 | 0/TBD | Not started | — |
+| 10. Visual Polish | v2.1 | 0/TBD | Not started | — |
+| 11. Meeting Engine Core | v2.1 | 0/TBD | Not started | — |
+| 12. Meeting Intelligence | v2.1 | 0/TBD | Not started | — |
+| 13. Meeting Quality Scoring | v2.1 | 0/TBD | Not started | — |
+| 14. Trust Network Graph | v2.1 | 0/TBD | Not started | — |
+| 15. Meeting Test Coverage | v2.1 | 0/TBD | Not started | — |
 
 ---
 *Roadmap created: 2026-03-15*
-*Last updated: 2026-03-15 — ALL 8 PHASES COMPLETE*
+*Last updated: 2026-03-17 — v2.1 phases 9-15 added*

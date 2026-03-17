@@ -298,11 +298,42 @@ Which phases cover which requirements. Updated by create-roadmap.
 
 **v2.1 Coverage:**
 - v2.1 requirements: 28 total (10 MEET + 10 VIZQ + 8 MTST)
-- Mapped to phases: 0 (awaiting roadmap)
+- Mapped to phases: 28
 - Completed: 0
-- Unmapped: 28
+- Unmapped: 0
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| VIZQ-01 | Phase 9: Visual Foundation | Pending |
+| VIZQ-05 | Phase 9: Visual Foundation | Pending |
+| VIZQ-09 | Phase 9: Visual Foundation | Pending |
+| VIZQ-10 | Phase 9: Visual Foundation | Pending |
+| VIZQ-02 | Phase 10: Visual Polish | Pending |
+| VIZQ-03 | Phase 10: Visual Polish | Pending |
+| VIZQ-04 | Phase 10: Visual Polish | Pending |
+| VIZQ-06 | Phase 10: Visual Polish | Pending |
+| MEET-01 | Phase 11: Meeting Engine Core | Pending |
+| MEET-02 | Phase 11: Meeting Engine Core | Pending |
+| MEET-05 | Phase 11: Meeting Engine Core | Pending |
+| MEET-06 | Phase 11: Meeting Engine Core | Pending |
+| MEET-03 | Phase 12: Meeting Intelligence | Pending |
+| MEET-04 | Phase 12: Meeting Intelligence | Pending |
+| MEET-07 | Phase 12: Meeting Intelligence | Pending |
+| MEET-08 | Phase 12: Meeting Intelligence | Pending |
+| MEET-09 | Phase 13: Meeting Quality Scoring | Pending |
+| MEET-10 | Phase 13: Meeting Quality Scoring | Pending |
+| VIZQ-07 | Phase 14: Trust Network Graph | Pending |
+| VIZQ-08 | Phase 14: Trust Network Graph | Pending |
+| MTST-01 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-02 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-03 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-04 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-05 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-06 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-07 | Phase 15: Meeting Test Coverage | Pending |
+| MTST-08 | Phase 15: Meeting Test Coverage | Pending |
 
 ---
 *Requirements defined: 2026-03-15*
 *v1 completed: 2026-03-15 — all 71 requirements verified DONE*
-*v2.1 defined: 2026-03-17 — 28 requirements across 3 categories*
+*v2.1 defined: 2026-03-17 — 28 requirements across 3 categories, mapped to 7 phases*
