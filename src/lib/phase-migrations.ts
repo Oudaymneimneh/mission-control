@@ -656,6 +656,7 @@ registerMigrations([
           created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
         CREATE INDEX IF NOT EXISTS idx_artifacts_project ON project_artifacts(project_id);
+        CREATE INDEX IF NOT EXISTS idx_artifacts_created_by ON project_artifacts(created_by_agent_id);
       `)
     }
   },

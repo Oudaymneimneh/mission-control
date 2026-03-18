@@ -66,6 +66,7 @@ export function HeaderBar() {
   // Simulation state
   const [simRunning, setSimRunning] = useState(false)
   const [simLoading, setSimLoading] = useState(false)
+  const [simError, setSimError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/simulation/tick')
@@ -74,14 +75,29 @@ export function HeaderBar() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (!simError) return
+    const t = setTimeout(() => setSimError(null), 4000)
+    return () => clearTimeout(t)
+  }, [simError])
+
   const handleSimToggle = async () => {
     setSimLoading(true)
+    setSimError(null)
     try {
       const endpoint = simRunning ? '/api/simulation/stop' : '/api/simulation/start'
       const res = await fetch(endpoint, { method: 'POST' })
-      if (res.ok) setSimRunning(!simRunning)
-    } catch { /* ignore */ }
-    finally { setSimLoading(false) }
+      if (res.ok) {
+        setSimRunning(!simRunning)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setSimError(data.error || `Failed (${res.status})`)
+      }
+    } catch {
+      setSimError('Network error')
+    } finally {
+      setSimLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -385,6 +401,9 @@ export function HeaderBar() {
           </Button>
 
           {/* Simulation Controls */}
+          {simError && (
+            <span className="text-2xs text-red-400 max-w-[140px] truncate" title={simError}>{simError}</span>
+          )}
           {simRunning ? (
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1.5 text-xs font-medium">

@@ -1095,9 +1095,9 @@ export function getMeetingDetail(db: Database.Database, meetingId: number): {
 export function listMeetings(
   db: Database.Database,
   workspaceId: number,
-  options: { status?: string; limit?: number; offset?: number } = {},
+  options: { status?: string; projectId?: number; limit?: number; offset?: number } = {},
 ): { meetings: Array<MeetingRow & { initiator_name: string; participant_name: string }>; total: number } {
-  const { status, limit = 20, offset = 0 } = options
+  const { status, projectId, limit = 20, offset = 0 } = options
 
   let whereClause = 'WHERE m.workspace_id = ?'
   const params: unknown[] = [workspaceId]
@@ -1105,6 +1105,11 @@ export function listMeetings(
   if (status) {
     whereClause += ' AND m.status = ?'
     params.push(status)
+  }
+
+  if (projectId) {
+    whereClause += ' AND m.project_id = ?'
+    params.push(projectId)
   }
 
   const total = db.prepare(

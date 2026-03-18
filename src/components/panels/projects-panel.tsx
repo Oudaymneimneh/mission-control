@@ -338,11 +338,10 @@ function MeetingsTab({ projectId }: { projectId: number }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/meetings?limit=100`)
+      const res = await fetch(`/api/meetings?project_id=${projectId}&limit=100`)
       if (!res.ok) throw new Error('Failed to fetch meetings')
       const json = await res.json()
-      const all: Meeting[] = json.data ?? []
-      setMeetings(all.filter(m => m.project_id === projectId))
+      setMeetings(json.data ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load meetings')
     } finally {
