@@ -40,9 +40,13 @@ export async function GET(request: NextRequest) {
     const rows = db.prepare(`
       SELECT p.id, p.workspace_id, p.name, p.slug, p.description, p.ticket_prefix, p.ticket_counter, p.status,
              p.github_repo, p.deadline, p.color, p.github_sync_enabled, p.github_labels_initialized, p.github_default_branch, p.created_at, p.updated_at,
+             p.team_id, tm.name as team_name,
              (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) as task_count,
+             (SELECT COUNT(*) FROM agent_meetings WHERE project_id = p.id AND status = 'concluded') as meeting_count,
+             (SELECT COUNT(*) FROM project_decisions WHERE project_id = p.id) as decision_count,
              (SELECT GROUP_CONCAT(paa.agent_name) FROM project_agent_assignments paa WHERE paa.project_id = p.id) as assigned_agents_csv
       FROM projects p
+      LEFT JOIN teams tm ON tm.id = p.team_id
       WHERE p.workspace_id = ?
         ${includeArchived ? '' : "AND p.status = 'active'"}
       ORDER BY p.name COLLATE NOCASE ASC
@@ -92,8 +96,16 @@ export async function POST(request: NextRequest) {
     const githubRepo = typeof body?.github_repo === 'string' ? body.github_repo.trim() || null : null
     const deadline = typeof body?.deadline === 'number' ? body.deadline : null
     const color = typeof body?.color === 'string' ? body.color.trim() || null : null
+    const teamId: number | null = typeof body?.team_id === 'number' && Number.isFinite(body.team_id) && body.team_id > 0
+      ? body.team_id
+      : null
 
     if (!name) return NextResponse.json({ error: 'Project name is required' }, { status: 400 })
+
+    if (teamId !== null) {
+      const team = db.prepare(`SELECT id FROM teams WHERE id = ? AND workspace_id = ?`).get(teamId, workspaceId)
+      if (!team) return NextResponse.json({ error: 'Team not found in workspace' }, { status: 404 })
+    }
 
     const slug = slugInput ? slugify(slugInput) : slugify(name)
     const ticketPrefix = normalizePrefix(prefixInput || name.slice(0, 5))
@@ -110,13 +122,13 @@ export async function POST(request: NextRequest) {
     }
 
     const result = db.prepare(`
-      INSERT INTO projects (workspace_id, name, slug, description, ticket_prefix, github_repo, deadline, color, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', unixepoch(), unixepoch())
-    `).run(workspaceId, name, slug, description || null, ticketPrefix, githubRepo, deadline, color)
+      INSERT INTO projects (workspace_id, name, slug, description, ticket_prefix, github_repo, deadline, color, team_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', unixepoch(), unixepoch())
+    `).run(workspaceId, name, slug, description || null, ticketPrefix, githubRepo, deadline, color, teamId)
 
     const project = db.prepare(`
       SELECT id, workspace_id, name, slug, description, ticket_prefix, ticket_counter, status,
-             github_repo, deadline, color, github_sync_enabled, github_labels_initialized, github_default_branch, created_at, updated_at
+             github_repo, deadline, color, github_sync_enabled, github_labels_initialized, github_default_branch, team_id, created_at, updated_at
       FROM projects
       WHERE id = ?
     `).get(Number(result.lastInsertRowid))

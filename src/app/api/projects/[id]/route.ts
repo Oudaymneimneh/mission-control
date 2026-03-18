@@ -173,6 +173,21 @@ export async function PATCH(
       updates.push('github_labels_initialized = ?')
       paramsList.push(body.github_labels_initialized ? 1 : 0)
     }
+    if (body?.team_id !== undefined) {
+      if (body.team_id === null) {
+        updates.push('team_id = ?')
+        paramsList.push(null)
+      } else {
+        const tid = Number(body.team_id)
+        if (!Number.isFinite(tid) || tid <= 0) {
+          return NextResponse.json({ error: 'Invalid team_id' }, { status: 400 })
+        }
+        const team = db.prepare(`SELECT id FROM teams WHERE id = ? AND workspace_id = ?`).get(tid, workspaceId)
+        if (!team) return NextResponse.json({ error: 'Team not found in workspace' }, { status: 404 })
+        updates.push('team_id = ?')
+        paramsList.push(tid)
+      }
+    }
 
     if (updates.length === 0) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
 
@@ -185,7 +200,7 @@ export async function PATCH(
 
     const project = db.prepare(`
       SELECT id, workspace_id, name, slug, description, ticket_prefix, ticket_counter, status,
-             github_repo, deadline, color, github_sync_enabled, github_labels_initialized, github_default_branch, created_at, updated_at
+             github_repo, deadline, color, github_sync_enabled, github_labels_initialized, github_default_branch, team_id, created_at, updated_at
       FROM projects
       WHERE id = ? AND workspace_id = ?
     `).get(projectId, workspaceId)
