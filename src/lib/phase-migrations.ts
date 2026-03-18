@@ -602,4 +602,61 @@ registerMigrations([
       }
     }
   },
+  {
+    id: 'phase_062_departments_project_wiring',
+    up: (db: Database.Database) => {
+      const teamCols = db.pragma('table_info(teams)') as Array<{ name: string }>
+      if (!teamCols.some(c => c.name === 'parent_id')) {
+        db.exec(`ALTER TABLE teams ADD COLUMN parent_id INTEGER REFERENCES teams(id) ON DELETE CASCADE`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_teams_parent ON teams(parent_id)`)
+      }
+      const projCols = db.pragma('table_info(projects)') as Array<{ name: string }>
+      if (!projCols.some(c => c.name === 'team_id')) {
+        db.exec(`ALTER TABLE projects ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_team ON projects(team_id)`)
+      }
+      const mtgCols = db.pragma('table_info(agent_meetings)') as Array<{ name: string }>
+      if (!mtgCols.some(c => c.name === 'project_id')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_meetings_project ON agent_meetings(project_id)`)
+      }
+    }
+  },
+  {
+    id: 'phase_063_project_decisions',
+    up: (db: Database.Database) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_decisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          meeting_id INTEGER REFERENCES agent_meetings(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          decided_by TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_decisions_project ON project_decisions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_decisions_meeting ON project_decisions(meeting_id);
+      `)
+    }
+  },
+  {
+    id: 'phase_064_project_artifacts',
+    up: (db: Database.Database) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_artifacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          meeting_id INTEGER REFERENCES agent_meetings(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          artifact_type TEXT NOT NULL DEFAULT 'document',
+          created_by_agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifacts_project ON project_artifacts(project_id);
+      `)
+    }
+  },
 ])
