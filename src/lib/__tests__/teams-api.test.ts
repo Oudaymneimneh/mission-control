@@ -10,6 +10,7 @@ import { z } from 'zod'
 const createTeamSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
+  parent_id: z.number().int().positive().nullable().optional(),
 })
 
 const updateTeamSchema = z.object({

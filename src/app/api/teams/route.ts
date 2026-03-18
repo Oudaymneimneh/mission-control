@@ -10,15 +10,25 @@ interface TeamRow {
   id: number
   name: string
   description: string | null
+  parent_id: number | null
   workspace_id: number
   created_at: number
   updated_at: number
   member_count?: number
 }
 
+interface TeamMemberRow {
+  team_id: number
+  id: number
+  name: string
+  role: string
+  status: string
+}
+
 const createTeamSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
+  parent_id: z.number().int().positive().nullable().optional(),
 })
 
 const updateTeamSchema = z.object({
@@ -41,6 +51,8 @@ export async function GET(request: NextRequest) {
   try {
     const db = getDatabase()
     const workspaceId = auth.user.workspace_id ?? 1
+    const url = new URL(request.url)
+    const includeMembers = url.searchParams.get('include')?.includes('members')
 
     const teams = db.prepare(`
       SELECT t.*, COUNT(tm.agent_id) as member_count
@@ -48,8 +60,31 @@ export async function GET(request: NextRequest) {
       LEFT JOIN team_members tm ON tm.team_id = t.id
       WHERE t.workspace_id = ?
       GROUP BY t.id
-      ORDER BY t.name ASC
+      ORDER BY (t.parent_id IS NULL) DESC, t.name ASC
     `).all(workspaceId) as TeamRow[]
+
+    if (includeMembers) {
+      const members = db.prepare(`
+        SELECT tm.team_id, a.id, a.name, a.role, a.status
+        FROM team_members tm
+        JOIN agents a ON a.id = tm.agent_id
+        WHERE a.workspace_id = ?
+      `).all(workspaceId) as TeamMemberRow[]
+
+      const membersByTeam = new Map<number, Array<Omit<TeamMemberRow, 'team_id'>>>()
+      for (const m of members) {
+        const list = membersByTeam.get(m.team_id) ?? []
+        list.push({ id: m.id, name: m.name, role: m.role, status: m.status })
+        membersByTeam.set(m.team_id, list)
+      }
+
+      const teamsWithMembers = teams.map(t => ({
+        ...t,
+        members: membersByTeam.get(t.id) ?? [],
+      }))
+
+      return NextResponse.json({ teams: teamsWithMembers })
+    }
 
     return NextResponse.json({ teams })
   } catch (error) {
@@ -71,15 +106,29 @@ export async function POST(request: NextRequest) {
   try {
     const result = await validateBody(request, createTeamSchema)
     if ('error' in result) return result.error
-    const { name, description } = result.data
+    const { name, description, parent_id } = result.data
 
     const db = getDatabase()
     const workspaceId = auth.user.workspace_id ?? 1
 
+    // Validate parent_id hierarchy depth (max 2 levels)
+    if (parent_id) {
+      const parent = db.prepare(
+        'SELECT id, parent_id FROM teams WHERE id = ? AND workspace_id = ?'
+      ).get(parent_id, workspaceId) as { id: number; parent_id: number | null } | undefined
+
+      if (!parent) {
+        return NextResponse.json({ error: 'Parent team not found' }, { status: 404 })
+      }
+      if (parent.parent_id !== null) {
+        return NextResponse.json({ error: 'Maximum hierarchy depth is 2 levels' }, { status: 400 })
+      }
+    }
+
     const insertResult = db.prepare(`
-      INSERT INTO teams (name, description, workspace_id)
-      VALUES (?, ?, ?)
-    `).run(name, description || null, workspaceId)
+      INSERT INTO teams (name, description, parent_id, workspace_id)
+      VALUES (?, ?, ?, ?)
+    `).run(name, description || null, parent_id || null, workspaceId)
 
     const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(insertResult.lastInsertRowid) as TeamRow
 
