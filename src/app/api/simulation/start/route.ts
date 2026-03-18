@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/auth'
 import { validateBody } from '@/lib/validation'
 import { logger } from '@/lib/logger'
 import { getSimulationEngine, isSimulationEnabled } from '@/lib/simulation-engine'
+import { getDatabase } from '@/lib/db'
 
 const schema = z.object({
   tickIntervalMs: z.number().int().min(1000).max(60000).optional(),
@@ -33,7 +34,17 @@ export async function POST(request: NextRequest) {
   try {
     const engine = getSimulationEngine(config)
     engine.start()
-    return NextResponse.json({ status: 'started', config: engine.getStatus().config })
+
+    const db = getDatabase()
+    const wakeResult = db.prepare(
+      "UPDATE agents SET status = 'idle', last_seen = unixepoch() WHERE status != 'error' AND workspace_id = ?"
+    ).run(auth.user.workspace_id)
+
+    return NextResponse.json({
+      status: 'started',
+      config: engine.getStatus().config,
+      agents_woken: wakeResult.changes,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to start simulation'
     logger.error({ err }, 'POST /api/simulation/start error')
