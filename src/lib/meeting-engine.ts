@@ -320,19 +320,30 @@ export function createMeeting(
     const agent = tx.prepare('SELECT status FROM agents WHERE id = ?').get(initiator.id) as { status: string } | undefined
     if (agent && agent.status === 'busy') return { created: false as const, reason: 'busy' }
 
-    // Find shared project between agents
-    const initiatorProjects = tx.prepare(
-      'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
-    ).all(initiator.name) as Array<{ project_id: number }>
+    // Find shared project between agents via team membership
+    // Priority: shared team project > explicit assignment > null
+    const sharedTeamProject = tx.prepare(`
+      SELECT p.id as project_id FROM projects p
+      JOIN team_members tm1 ON tm1.team_id = p.team_id
+      JOIN team_members tm2 ON tm2.team_id = p.team_id
+      WHERE tm1.agent_id = ? AND tm2.agent_id = ? AND p.workspace_id = ?
+      LIMIT 1
+    `).get(initiator.id, participant.id, initiator.workspace_id) as { project_id: number } | undefined
 
-    const participantProjects = tx.prepare(
-      'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
-    ).all(participant.name) as Array<{ project_id: number }>
-
-    const initiatorProjectIds = new Set(initiatorProjects.map(r => r.project_id))
-    const sharedProjectId = participantProjects.find(r => initiatorProjectIds.has(r.project_id))?.project_id
-      ?? initiatorProjects[0]?.project_id
-      ?? null
+    // Fallback: check explicit project_agent_assignments (manual assignment)
+    let sharedProjectId = sharedTeamProject?.project_id ?? null
+    if (!sharedProjectId) {
+      const initiatorProjects = tx.prepare(
+        'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
+      ).all(initiator.name) as Array<{ project_id: number }>
+      const participantProjects = tx.prepare(
+        'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
+      ).all(participant.name) as Array<{ project_id: number }>
+      const initiatorProjectIds = new Set(initiatorProjects.map(r => r.project_id))
+      sharedProjectId = participantProjects.find(r => initiatorProjectIds.has(r.project_id))?.project_id
+        ?? initiatorProjects[0]?.project_id
+        ?? null
+    }
 
     const initPos = tx.prepare(
       'SELECT x, y FROM agent_office_positions WHERE agent_id = ?'

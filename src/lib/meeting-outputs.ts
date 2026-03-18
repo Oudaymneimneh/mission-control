@@ -1,4 +1,4 @@
-import { getDatabase } from '@/lib/db'
+import { getDatabase, writeTransaction } from '@/lib/db'
 import { logger } from '@/lib/logger'
 import { complete } from '@/lib/llm/router'
 
@@ -60,23 +60,21 @@ export async function extractMeetingOutputs(
     parsed.artifacts = parsed.artifacts.slice(0, 1)
 
     // Save decisions + artifacts to DB if project_id exists
-    if (projectId) {
+    if (projectId && (parsed.decisions.length > 0 || parsed.artifacts.length > 0)) {
       const db = getDatabase()
-      for (const d of parsed.decisions) {
-        try {
-          db.prepare('INSERT INTO project_decisions (project_id, meeting_id, title, description, decided_by, status) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(projectId, meetingId, d.title, d.description, '[]', 'active')
-        } catch (err) {
-          logger.warn({ err, meetingId }, 'Failed to save decision')
-        }
-      }
-      for (const a of parsed.artifacts) {
-        try {
-          db.prepare('INSERT INTO project_artifacts (project_id, meeting_id, title, content, artifact_type) VALUES (?, ?, ?, ?, ?)')
-            .run(projectId, meetingId, a.title, a.content, a.type || 'document')
-        } catch (err) {
-          logger.warn({ err, meetingId }, 'Failed to save artifact')
-        }
+      try {
+        writeTransaction(db, (tx) => {
+          for (const d of parsed.decisions) {
+            tx.prepare('INSERT INTO project_decisions (project_id, meeting_id, title, description, decided_by, status) VALUES (?, ?, ?, ?, ?, ?)')
+              .run(projectId, meetingId, d.title, d.description, '[]', 'active')
+          }
+          for (const a of parsed.artifacts) {
+            tx.prepare('INSERT INTO project_artifacts (project_id, meeting_id, title, content, artifact_type) VALUES (?, ?, ?, ?, ?)')
+              .run(projectId, meetingId, a.title, a.content, a.type || 'document')
+          }
+        })
+      } catch (err) {
+        logger.warn({ err, meetingId }, 'Failed to save meeting outputs')
       }
     }
 
