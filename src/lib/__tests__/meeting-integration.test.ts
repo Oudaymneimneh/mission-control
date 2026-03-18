@@ -34,6 +34,10 @@ vi.mock('@/lib/meeting-actions', () => ({
   extractMeetingActions: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock('@/lib/meeting-outputs', () => ({
+  extractMeetingOutputs: vi.fn().mockResolvedValue({ action_items: [], decisions: [], artifacts: [] }),
+}))
+
 import { generateMeetingTurn, summarizeMeeting } from '@/lib/meeting-engine'
 import type { MeetingRow } from '@/lib/meeting-engine'
 import { complete } from '@/lib/llm/router'
@@ -104,6 +108,7 @@ function makeMeeting(overrides: Partial<MeetingRow> = {}): MeetingRow {
     recurring_interval_ms: null,
     created_at: Math.floor(Date.now() / 1000),
     quality_score: null,
+    project_id: null,
     ...overrides,
   }
 }

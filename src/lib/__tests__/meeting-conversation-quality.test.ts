@@ -98,6 +98,7 @@ function makeMeeting(overrides: Partial<MeetingRow> = {}): MeetingRow {
     recurring_interval_ms: null,
     created_at: Math.floor(Date.now() / 1000),
     quality_score: null,
+    project_id: null,
     ...overrides,
   }
 }

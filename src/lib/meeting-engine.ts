@@ -39,6 +39,7 @@ export interface MeetingRow {
   started_at: number | null
   concluded_at: number | null
   quality_score: string | null
+  project_id: number | null
   created_at: number
 }
 
@@ -319,6 +320,20 @@ export function createMeeting(
     const agent = tx.prepare('SELECT status FROM agents WHERE id = ?').get(initiator.id) as { status: string } | undefined
     if (agent && agent.status === 'busy') return { created: false as const, reason: 'busy' }
 
+    // Find shared project between agents
+    const initiatorProjects = tx.prepare(
+      'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
+    ).all(initiator.name) as Array<{ project_id: number }>
+
+    const participantProjects = tx.prepare(
+      'SELECT project_id FROM project_agent_assignments WHERE agent_name = ?'
+    ).all(participant.name) as Array<{ project_id: number }>
+
+    const initiatorProjectIds = new Set(initiatorProjects.map(r => r.project_id))
+    const sharedProjectId = participantProjects.find(r => initiatorProjectIds.has(r.project_id))?.project_id
+      ?? initiatorProjects[0]?.project_id
+      ?? null
+
     const initPos = tx.prepare(
       'SELECT x, y FROM agent_office_positions WHERE agent_id = ?'
     ).get(initiator.id) as { x: number; y: number } | undefined
@@ -333,9 +348,9 @@ export function createMeeting(
 
     const now = Math.floor(Date.now() / 1000)
     const result = tx.prepare(`
-      INSERT INTO agent_meetings (workspace_id, initiator_id, participant_id, status, location_x, location_y, max_turns, started_at, created_at)
-      VALUES (?, ?, ?, 'walking', ?, ?, ?, ?, ?)
-    `).run(initiator.workspace_id, initiator.id, participant.id, lx, ly, maxTurns, now, now)
+      INSERT INTO agent_meetings (workspace_id, initiator_id, participant_id, status, location_x, location_y, max_turns, project_id, started_at, created_at)
+      VALUES (?, ?, ?, 'walking', ?, ?, ?, ?, ?, ?)
+    `).run(initiator.workspace_id, initiator.id, participant.id, lx, ly, maxTurns, sharedProjectId, now, now)
 
     const meetingId = Number(result.lastInsertRowid)
 
@@ -595,12 +610,21 @@ export async function generateMeetingTurn(
 
   // Build system prompt with persona
   const agentConfig = speaker.config ? JSON.parse(speaker.config) : {}
-  const systemPrompt = buildSystemPrompt({
+  let systemPrompt = buildSystemPrompt({
     name: speaker.name,
     role: speaker.role,
     soul_content: speaker.soul_content,
     config: agentConfig,
   })
+
+  // Inject project context if meeting is associated with a project
+  if (meeting.project_id) {
+    const project = db.prepare('SELECT name, description FROM projects WHERE id = ?')
+      .get(meeting.project_id) as { name: string; description: string | null } | undefined
+    if (project) {
+      systemPrompt += `\n\nYou are working on the project '${project.name}'.${project.description ? ' ' + project.description + '.' : ''} Focus your discussion on this project.`
+    }
+  }
 
   // Generate topic on first turn
   let topicContext = ''
@@ -794,6 +818,22 @@ export async function summarizeMeeting(
       `).run(taskTitle, summary, initiator.name, meeting.id, meeting.workspace_id)
     } catch (err) {
       logger.warn({ meetingId: meeting.id, error: String(err) }, 'Failed to create task from short meeting')
+    }
+  }
+
+  // Phase 4b2: Extract structured outputs (decisions, artifacts) — async, non-critical
+  if (messages.length >= 2) {
+    try {
+      const { extractMeetingOutputs } = await import('@/lib/meeting-outputs')
+      await extractMeetingOutputs(
+        messages.map(m => ({ agent_name: m.agent_name, content: m.content, turn_number: 0 })),
+        meeting.topic,
+        meeting.id,
+        meeting.project_id,
+        meeting.workspace_id,
+      )
+    } catch (err) {
+      logger.warn({ err, meetingId: meeting.id }, 'Meeting output extraction failed')
     }
   }
 

@@ -325,7 +325,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: null, summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       // Speaker query
@@ -357,7 +357,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
@@ -371,7 +371,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 5, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       // turn_count=5 is odd → participant speaks (id=2)
@@ -665,7 +665,7 @@ describe('meeting-engine', () => {
           status: 'scheduled', topic: 'Sync up', summary: null,
           location_x: null, location_y: null, turn_count: 0, max_turns: 6,
           scheduled_for: 1000, recurring_interval_ms: null,
-          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+          started_at: null, concluded_at: null, quality_score: null, project_id: null, created_at: 100,
         }),
       })
 
@@ -714,7 +714,7 @@ describe('meeting-engine', () => {
           status: 'scheduled', topic: null, summary: null,
           location_x: null, location_y: null, turn_count: 0, max_turns: 6,
           scheduled_for: null, recurring_interval_ms: null,
-          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+          started_at: null, concluded_at: null, quality_score: null, project_id: null, created_at: 100,
         }),
       })
 
@@ -738,7 +738,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       // Phase 1 tx: transition to summarizing + read messages + initiator
@@ -768,7 +768,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       // Phase 1 tx: transition to summarizing + empty messages
@@ -791,7 +791,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 4, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -823,7 +823,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -851,7 +851,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -882,7 +882,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'Weekly sync', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: 3600000, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: 3600000, created_at: 100, quality_score: null, project_id: null,
       }
 
       // Phase 1 tx: transition to summarizing + read messages + initiator
@@ -909,7 +909,7 @@ describe('meeting-engine', () => {
           status: 'scheduled', topic: 'Weekly sync', summary: null,
           location_x: null, location_y: null, turn_count: 0, max_turns: 6,
           scheduled_for: Math.floor((Date.now() + 3600000) / 1000), recurring_interval_ms: 3600000,
-          started_at: null, concluded_at: null, quality_score: null, created_at: 100,
+          started_at: null, concluded_at: null, quality_score: null, project_id: null, created_at: 100,
         }),
       })
 
@@ -1195,7 +1195,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when('agents WHERE id', {
@@ -1223,7 +1223,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when('agents WHERE id', {
@@ -1244,7 +1244,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 1, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       // turn_count=1 → odd → participant_id (2) speaks
@@ -1270,7 +1270,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'walking' as const, topic: null, summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
@@ -1282,7 +1282,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 8, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       const result = await generateMeetingTurn({} as any, meeting)
@@ -1382,7 +1382,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 0, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when('agents WHERE id', {
@@ -1408,7 +1408,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       const statusRunMock = vi.fn()
@@ -1606,7 +1606,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
@@ -1634,7 +1634,7 @@ describe('meeting-engine', () => {
         id: 1, workspace_id: 1, initiator_id: 1, participant_id: 2,
         status: 'conversing' as const, topic: 'test', summary: null,
         location_x: 40, location_y: 50, turn_count: 6, max_turns: 6,
-        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null,
+        started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
       db._when("SET status = ?", { run: vi.fn() })
