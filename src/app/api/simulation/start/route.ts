@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { requireRole } from '@/lib/auth'
-import { validateBody } from '@/lib/validation'
 import { logger } from '@/lib/logger'
 import { getSimulationEngine, isSimulationEnabled } from '@/lib/simulation-engine'
 import { getDatabase } from '@/lib/db'
-
-const schema = z.object({
-  tickIntervalMs: z.number().int().min(1000).max(60000).optional(),
-  dryRun: z.boolean().optional(),
-  operationTimeoutMs: z.number().int().min(5000).max(300000).optional(),
-}).optional()
 
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
