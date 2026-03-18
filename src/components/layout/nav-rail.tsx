@@ -35,6 +35,7 @@ const navGroups: NavGroup[] = [
       { id: 'channels', label: 'Channels', icon: <ChannelsIcon />, priority: false },
       { id: 'skills', label: 'Skills', icon: <SkillsIcon />, priority: false },
       { id: 'memory', label: 'Memory', icon: <MemoryIcon />, priority: false },
+      { id: 'teams', label: 'Teams', icon: <TeamsIcon />, priority: false },
     ],
   },
   {
@@ -118,6 +119,7 @@ const navItemTranslationKeys: Record<string, string> = {
   integrations: 'integrations',
   debug: 'debug',
   settings: 'settings',
+  teams: 'teams',
 }
 
 // Map group IDs to translation keys in the 'nav.group' namespace
@@ -1541,6 +1543,18 @@ function SecurityIcon() {
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 1l6 3v4c0 3.5-2.5 6.5-6 7.5C4.5 14.5 2 11.5 2 8V4l6-3z" />
       <path d="M5.5 8l2 2 3.5-3.5" />
+    </svg>
+  )
+}
+
+function TeamsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="5" r="2" />
+      <circle cx="4" cy="11" r="2" />
+      <circle cx="12" cy="11" r="2" />
+      <line x1="8" y1="7" x2="4" y2="9" />
+      <line x1="8" y1="7" x2="12" y2="9" />
     </svg>
   )
 }

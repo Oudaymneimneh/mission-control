@@ -98,6 +98,7 @@
     "integrations": "Integrations",
     "debug": "Debug",
     "settings": "Settings",
+    "teams": "Teams",
     "group": {
       "observe": "OBSERVE",
       "automate": "AUTOMATE",
