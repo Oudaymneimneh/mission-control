@@ -36,6 +36,7 @@ const navGroups: NavGroup[] = [
       { id: 'skills', label: 'Skills', icon: <SkillsIcon />, priority: false },
       { id: 'memory', label: 'Memory', icon: <MemoryIcon />, priority: false },
       { id: 'teams', label: 'Teams', icon: <TeamsIcon />, priority: false },
+      { id: 'projects', label: 'Projects', icon: <ProjectsIcon />, priority: true },
     ],
   },
   {
@@ -1555,6 +1556,16 @@ function TeamsIcon() {
       <circle cx="12" cy="11" r="2" />
       <line x1="8" y1="7" x2="4" y2="9" />
       <line x1="8" y1="7" x2="12" y2="9" />
+    </svg>
+  )
+}
+
+function ProjectsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="12" height="12" rx="2" />
+      <line x1="6" y1="2" x2="6" y2="14" />
+      <line x1="6" y1="6" x2="14" y2="6" />
     </svg>
   )
 }

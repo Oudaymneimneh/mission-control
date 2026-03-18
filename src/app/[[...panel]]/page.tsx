@@ -41,6 +41,7 @@ import { WorkflowPanel } from '@/components/panels/workflow-panel'
 import { DebatePanel } from '@/components/panels/debate-panel'
 import { ScalingPanel } from '@/components/panels/scaling-panel'
 import { TeamsPanel } from '@/components/panels/teams-panel'
+import { ProjectsPanel } from '@/components/panels/projects-panel'
 import { ChatPanel } from '@/components/chat/chat-panel'
 import { getPluginPanel } from '@/lib/plugins'
 import { shouldRedirectDashboardToHttps } from '@/lib/browser-security'
@@ -582,6 +583,8 @@ function ContentRouter({ tab }: { tab: string }) {
       return <ScalingPanel />
     case 'teams':
       return <TeamsPanel />
+    case 'projects':
+      return <ProjectsPanel />
     case 'chat':
       return <ChatPagePanel />
     default: {

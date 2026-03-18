@@ -99,6 +99,7 @@
     "debug": "Debug",
     "settings": "Settings",
     "teams": "Teams",
+    "projects": "Projects",
     "group": {
       "observe": "OBSERVE",
       "automate": "AUTOMATE",
