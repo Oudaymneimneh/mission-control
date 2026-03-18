@@ -63,6 +63,27 @@ export function HeaderBar() {
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [isMounted, setIsMounted] = useState(false)
 
+  // Simulation state
+  const [simRunning, setSimRunning] = useState(false)
+  const [simLoading, setSimLoading] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/simulation/tick')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.running) setSimRunning(true) })
+      .catch(() => {})
+  }, [])
+
+  const handleSimToggle = async () => {
+    setSimLoading(true)
+    try {
+      const endpoint = simRunning ? '/api/simulation/stop' : '/api/simulation/start'
+      const res = await fetch(endpoint, { method: 'POST' })
+      if (res.ok) setSimRunning(!simRunning)
+    } catch { /* ignore */ }
+    finally { setSimLoading(false) }
+  }
+
   useEffect(() => {
     setIsMounted(true)
   }, [])
@@ -362,6 +383,23 @@ export function HeaderBar() {
           >
             <SearchIcon />
           </Button>
+
+          {/* Simulation Controls */}
+          {simRunning ? (
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                LIVE
+              </span>
+              <Button size="xs" variant="ghost" onClick={handleSimToggle} disabled={simLoading}>
+                {simLoading ? '...' : 'Stop'}
+              </Button>
+            </div>
+          ) : (
+            <Button size="sm" onClick={handleSimToggle} disabled={simLoading}>
+              {simLoading ? 'Starting...' : 'Start Office'}
+            </Button>
+          )}
 
           <Button
             variant="ghost"
