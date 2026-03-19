@@ -178,13 +178,18 @@ export function proxy(request: NextRequest) {
     return addSecurityHeaders(response, request, nonce)
   }
 
+  // Local dev mode: skip all proxy auth (route-level auth still applies via MC_DISABLE_AUTH)
+  if (process.env.MC_DISABLE_AUTH === '1') {
+    const { response, nonce } = nextResponseWithNonce(request)
+    return addSecurityHeaders(response, request, nonce)
+  }
+
   // Check for session cookie
   const sessionToken = request.cookies.get(MC_SESSION_COOKIE_NAME)?.value || request.cookies.get(LEGACY_MC_SESSION_COOKIE_NAME)?.value
 
   // API routes: accept session cookie OR API key
   if (pathname.startsWith('/api/')) {
-    // Local dev mode: skip proxy auth (route-level auth still applies via MC_DISABLE_AUTH)
-    if (process.env.MC_DISABLE_AUTH === '1' || process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== 'production') {
       const { response, nonce } = nextResponseWithNonce(request)
       return addSecurityHeaders(response, request, nonce)
     }
