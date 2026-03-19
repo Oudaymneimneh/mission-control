@@ -195,7 +195,9 @@ describe('meeting integration — full conversation flow', () => {
     const statusRunMock = vi.fn((...args: any[]) => { statusCalls.push(args) })
 
     const db = createMockDb()
-    // Both "SET status = ?" and "SET status = 'concluded', summary = ?" match this fragment
+    // Atomic guard: check status before transition
+    db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+    // Both "SET status = 'summarizing'" and "SET status = 'concluded', summary = ?" match this fragment
     db._when('UPDATE agent_meetings SET status', { run: statusRunMock })
     db._when('SELECT mm.content', { all: vi.fn().mockReturnValue(messages) })
     db._when('FROM agents WHERE id', {
@@ -210,8 +212,8 @@ describe('meeting integration — full conversation flow', () => {
 
     // Verify: status set to summarizing (first call) then concluded with summary (second call)
     expect(statusRunMock).toHaveBeenCalledTimes(2)
-    // First call: SET status = 'summarizing'
-    expect(statusCalls[0]).toEqual(['summarizing', 100])
+    // First call: SET status = 'summarizing' WHERE id = ? (status is in SQL, not a param)
+    expect(statusCalls[0]).toEqual([100])
     // Second call: SET status = 'concluded', summary = ?, concluded_at = ...
     expect(statusCalls[1][0]).toBe(RECORDED.summary.text) // summary
     expect(statusCalls[1][1]).toBe(100) // meeting id
@@ -325,6 +327,7 @@ describe('meeting integration — quality scoring', () => {
     const qualityRunMock = vi.fn()
 
     const db = createMockDb()
+    db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
     db._when('UPDATE agent_meetings SET status', { run: vi.fn() })
     db._when('SELECT mm.content', { all: vi.fn().mockReturnValue(messages) })
     db._when('FROM agents WHERE id', {
@@ -369,6 +372,7 @@ describe('meeting integration — quality scoring', () => {
     const statusRunMock = vi.fn((...args: any[]) => { statusCalls.push(args) })
 
     const db = createMockDb()
+    db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
     db._when('UPDATE agent_meetings SET status', { run: statusRunMock })
     db._when('SELECT mm.content', { all: vi.fn().mockReturnValue(messages) })
     db._when('FROM agents WHERE id', {
@@ -383,6 +387,7 @@ describe('meeting integration — quality scoring', () => {
 
     // Meeting still concludes successfully
     expect(statusRunMock).toHaveBeenCalledTimes(2)
+    expect(statusCalls[0]).toEqual([100]) // SET status = 'summarizing' WHERE id = ?
     expect(statusCalls[1][0]).toBe(RECORDED.summary.text)
     expect(statusCalls[1][1]).toBe(100)
 
@@ -410,6 +415,7 @@ describe('meeting integration — quality scoring', () => {
     const qualityRunMock = vi.fn()
 
     const db = createMockDb()
+    db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
     db._when('UPDATE agent_meetings SET status', { run: vi.fn() })
     db._when('SELECT mm.content', { all: vi.fn().mockReturnValue(messages) })
     db._when('FROM agents WHERE id', {

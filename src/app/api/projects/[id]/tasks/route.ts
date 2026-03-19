@@ -64,8 +64,8 @@ export async function GET(
       project,
       tasks: tasks.map((task: any) => ({
         ...task,
-        tags: task.tags ? JSON.parse(task.tags) : [],
-        metadata: task.metadata ? JSON.parse(task.metadata) : {},
+        tags: (() => { try { return task.tags ? JSON.parse(task.tags) : [] } catch { return [] } })(),
+        metadata: (() => { try { return task.metadata ? JSON.parse(task.metadata) : {} } catch { return {} } })(),
         ticket_ref: formatTicketRef(task.project_prefix, task.project_ticket_no),
       }))
     })

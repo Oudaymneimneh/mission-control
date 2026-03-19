@@ -463,6 +463,7 @@ export function ProjectsPanel() {
   // ------ Data fetching ------
 
   const fetchProjects = useCallback(async () => {
+    setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/projects')

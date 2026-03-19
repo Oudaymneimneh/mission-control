@@ -21,17 +21,16 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = request.nextUrl
   const agentIdStr = searchParams.get('agentId')
-  const workspaceIdStr = searchParams.get('workspaceId')
 
-  if (!agentIdStr || !workspaceIdStr) {
-    return NextResponse.json({ error: 'agentId and workspaceId are required' }, { status: 400 })
+  if (!agentIdStr) {
+    return NextResponse.json({ error: 'agentId is required' }, { status: 400 })
   }
 
   const agentId = Number(agentIdStr)
-  const workspaceId = Number(workspaceIdStr)
+  const workspaceId = auth.user.workspace_id ?? 1
 
-  if (!Number.isFinite(agentId) || !Number.isFinite(workspaceId)) {
-    return NextResponse.json({ error: 'Invalid agentId or workspaceId' }, { status: 400 })
+  if (!Number.isFinite(agentId)) {
+    return NextResponse.json({ error: 'Invalid agentId' }, { status: 400 })
   }
 
   try {

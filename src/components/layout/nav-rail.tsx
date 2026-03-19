@@ -121,6 +121,7 @@ const navItemTranslationKeys: Record<string, string> = {
   debug: 'debug',
   settings: 'settings',
   teams: 'teams',
+  projects: 'projects',
 }
 
 // Map group IDs to translation keys in the 'nav.group' namespace

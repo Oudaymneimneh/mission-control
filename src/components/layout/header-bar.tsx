@@ -40,6 +40,8 @@ const QUICK_NAV_COMMANDS: Array<{ panel: string; titleKey: string; title: string
   { panel: 'github', titleKey: 'goToGithubSync', title: 'Go to GitHub Sync', aliases: ['github', 'sync'] },
   { panel: 'office', titleKey: 'goToOffice', title: 'Go to Office', aliases: ['workspace', 'team'] },
   { panel: 'skills', titleKey: 'goToSkills', title: 'Go to Skills', aliases: ['skill packs', 'agent skills'] },
+  { panel: 'teams', titleKey: 'goToTeams', title: 'Go to Teams', aliases: ['team management', 'squads'] },
+  { panel: 'projects', titleKey: 'goToProjects', title: 'Go to Projects', aliases: ['project board', 'repos'] },
 ]
 
 export function HeaderBar() {
@@ -88,7 +90,14 @@ export function HeaderBar() {
       const endpoint = simRunning ? '/api/simulation/stop' : '/api/simulation/start'
       const res = await fetch(endpoint, { method: 'POST' })
       if (res.ok) {
-        setSimRunning(!simRunning)
+        // Confirm actual state from server instead of toggling local state
+        const statusRes = await fetch('/api/simulation/tick')
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          setSimRunning(!!statusData.running)
+        } else {
+          setSimRunning(!simRunning)
+        }
       } else {
         const data = await res.json().catch(() => ({}))
         setSimError(data.error || `Failed (${res.status})`)

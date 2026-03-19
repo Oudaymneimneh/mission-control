@@ -41,6 +41,7 @@ export interface SimulationConfig {
   sameAgentCooldownMs: number
   activityChangeCooldownMs: number
   dryRun: boolean
+  workspaceId?: number
 }
 
 interface AgentTickState {
@@ -127,6 +128,8 @@ export class SimulationEngine {
 
   /** Stop the simulation loop. */
   stop(): void {
+    if (!this.running && !this.interval) return
+
     if (this.interval) {
       clearInterval(this.interval)
       this.interval = null
@@ -183,10 +186,14 @@ export class SimulationEngine {
       this.tickCount++
       const db = getDatabase()
 
-      // Get all idle agents
-      const agents = db.prepare(
-        "SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE status = 'idle'"
-      ).all() as AgentRow[]
+      // Get all idle agents (scoped to workspace if configured)
+      const agents = this.config.workspaceId
+        ? db.prepare(
+            "SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE status = 'idle' AND workspace_id = ?"
+          ).all(this.config.workspaceId) as AgentRow[]
+        : db.prepare(
+            "SELECT id, name, role, status, soul_content, config, workspace_id FROM agents WHERE status = 'idle'"
+          ).all() as AgentRow[]
 
       // Prune agentStates for agents no longer in idle pool + cancel stale meetings
       const activeIds = new Set(agents.map((a) => a.id))

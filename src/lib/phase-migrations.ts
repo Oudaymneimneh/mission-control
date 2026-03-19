@@ -660,4 +660,22 @@ registerMigrations([
       `)
     }
   },
+  {
+    id: 'phase_065_meeting_columns_and_indexes',
+    up: (db: Database.Database) => {
+      const cols = db.pragma('table_info(agent_meetings)') as Array<{ name: string }>
+      const colNames = new Set(cols.map(c => c.name))
+      if (!colNames.has('turn_count')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN turn_count INTEGER NOT NULL DEFAULT 0`)
+      }
+      if (!colNames.has('max_turns')) {
+        db.exec(`ALTER TABLE agent_meetings ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 6`)
+      }
+
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_wf_phase_runs_phase ON workflow_phase_runs(phase_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_meeting ON project_artifacts(meeting_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_wf_runs_current_phase ON workflow_runs(current_phase_id)`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_spatial_positions_workspace ON spatial_positions(workspace_id)`)
+    }
+  },
 ])

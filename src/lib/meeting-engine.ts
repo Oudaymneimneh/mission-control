@@ -20,7 +20,7 @@ import { eventBus } from '@/lib/event-bus'
 
 // --- Types ---
 
-export type MeetingStatus = 'walking' | 'conversing' | 'summarizing' | 'concluded' | 'cancelled'
+export type MeetingStatus = 'walking' | 'conversing' | 'summarizing' | 'concluded' | 'cancelled' | 'scheduled'
 
 export interface MeetingRow {
   id: number
@@ -113,8 +113,11 @@ export function parsePersonality(config: string | null): ParsedPersonality | nul
   if (!config) return null
   try {
     const parsed = JSON.parse(config)
-    const p = parsed?.persona?.personality
-    if (!p) return null
+    const personality = parsed?.persona?.personality
+    if (!personality) return null
+    // Big Five traits live at personality.big_five.{trait} (persona-engine format)
+    // Fall back to flat personality.{trait} for legacy/test compatibility
+    const p = personality.big_five ?? personality
     return {
       extraversion: p.extraversion ?? 0.5,
       agreeableness: p.agreeableness ?? 0.5,
@@ -308,8 +311,8 @@ export function createMeeting(
   // Determine max turns based on traits (parse BEFORE tx)
   const initParsed = initiator.config ? JSON.parse(initiator.config) : {}
   const partParsed = participant.config ? JSON.parse(participant.config) : {}
-  const initC = initParsed?.persona?.personality?.conscientiousness ?? 0.5
-  const partC = partParsed?.persona?.personality?.conscientiousness ?? 0.5
+  const initC = initParsed?.persona?.personality?.big_five?.conscientiousness ?? initParsed?.persona?.personality?.conscientiousness ?? 0.5
+  const partC = partParsed?.persona?.personality?.big_five?.conscientiousness ?? partParsed?.persona?.personality?.conscientiousness ?? 0.5
   const avgConscient = (initC + partC) / 2
   // Higher conscientiousness = longer meetings (4-8 turns)
   const maxTurns = Math.round(4 + avgConscient * 4)
@@ -327,7 +330,7 @@ export function createMeeting(
       JOIN team_members tm1 ON tm1.team_id = p.team_id
       JOIN team_members tm2 ON tm2.team_id = p.team_id
       WHERE tm1.agent_id = ? AND tm2.agent_id = ? AND p.workspace_id = ?
-      LIMIT 1
+      ORDER BY p.created_at ASC LIMIT 1
     `).get(initiator.id, participant.id, initiator.workspace_id) as { project_id: number } | undefined
 
     // Fallback: check explicit project_agent_assignments (manual assignment)
@@ -445,19 +448,20 @@ export function createScheduledMeeting(
     throw new Error('Agents must be in same workspace')
   }
 
-  const scheduled = db.prepare(
-    `SELECT COUNT(*) as cnt FROM agent_meetings WHERE workspace_id = ? AND status = 'scheduled'`
-  ).get(workspaceId) as { cnt: number }
-  if (scheduled.cnt >= 5) throw new Error('Maximum scheduled meetings reached')
-
   const now = Math.floor(Date.now() / 1000)
   const meeting = writeTransaction(db, (tx) => {
+    const scheduled = tx.prepare(
+      `SELECT COUNT(*) as cnt FROM agent_meetings WHERE workspace_id = ? AND status = 'scheduled'`
+    ).get(workspaceId) as { cnt: number }
+    if (scheduled.cnt >= 5) return null
+
     const result = tx.prepare(`
       INSERT INTO agent_meetings (workspace_id, initiator_id, participant_id, status, topic, max_turns, scheduled_for, recurring_interval_ms, created_at)
       VALUES (?, ?, ?, 'scheduled', ?, 6, ?, ?, ?)
     `).run(workspaceId, initiatorId, participantId, topic || null, scheduledFor || null, recurringIntervalMs || null, now)
     return tx.prepare('SELECT * FROM agent_meetings WHERE id = ?').get(Number(result.lastInsertRowid)) as MeetingRow
   })
+  if (!meeting) throw new Error('Maximum scheduled meetings reached')
 
   eventBus.broadcast('meeting.scheduled', {
     meeting_id: meeting.id,
@@ -717,24 +721,27 @@ export async function summarizeMeeting(
   db: Database.Database,
   meeting: MeetingRow,
 ): Promise<void> {
-  // Phase 1: Read data and transition to summarizing (single tx)
-  const { messages, initiator } = writeTransaction(db, (tx) => {
-    tx.prepare('UPDATE agent_meetings SET status = ? WHERE id = ?').run('summarizing', meeting.id)
-
-    const msgs = tx.prepare(`
-      SELECT mm.content, a.name as agent_name
-      FROM meeting_messages mm
-      JOIN agents a ON mm.agent_id = a.id
-      WHERE mm.meeting_id = ?
-      ORDER BY mm.turn_number ASC
-    `).all(meeting.id) as Array<{ content: string; agent_name: string }>
-
-    const init = tx.prepare(
-      'SELECT id, name, role, soul_content, config, workspace_id FROM agents WHERE id = ?'
-    ).get(meeting.initiator_id) as AgentForMeeting | undefined
-
-    return { messages: msgs, initiator: init }
+  // Atomic check-and-set to prevent concurrent summarization
+  const transitioned = writeTransaction(db, (tx) => {
+    const current = tx.prepare('SELECT status FROM agent_meetings WHERE id = ?').get(meeting.id) as { status: string } | undefined
+    if (!current || current.status !== 'conversing') return false
+    tx.prepare("UPDATE agent_meetings SET status = 'summarizing' WHERE id = ?").run(meeting.id)
+    return true
   })
+  if (!transitioned) return
+
+  // Phase 1: Read data for summarization
+  const messages = db.prepare(`
+    SELECT mm.content, a.name as agent_name
+    FROM meeting_messages mm
+    JOIN agents a ON mm.agent_id = a.id
+    WHERE mm.meeting_id = ?
+    ORDER BY mm.turn_number ASC
+  `).all(meeting.id) as Array<{ content: string; agent_name: string }>
+
+  const initiator = db.prepare(
+    'SELECT id, name, role, soul_content, config, workspace_id FROM agents WHERE id = ?'
+  ).get(meeting.initiator_id) as AgentForMeeting | undefined
 
   if (messages.length === 0 || !initiator) {
     writeTransaction(db, (tx) => {
@@ -799,16 +806,14 @@ export async function summarizeMeeting(
       })
 
       if (actions.length > 0) {
-        for (const action of actions) {
-          try {
-            db.prepare(`
+        writeTransaction(db, (tx) => {
+          for (const action of actions) {
+            tx.prepare(`
               INSERT INTO tasks (title, description, assigned_to, status, priority, source_type, source_id, workspace_id, created_at, updated_at)
               VALUES (?, ?, ?, 'inbox', 'medium', 'meeting', ?, ?, unixepoch(), unixepoch())
             `).run(action.title, action.description, action.assignee_name, meeting.id, meeting.workspace_id)
-          } catch (err) {
-            logger.warn({ meetingId: meeting.id, error: String(err) }, 'Failed to create task from meeting action')
           }
-        }
+        })
 
         eventBus.broadcast('meeting.actions_created', {
           meeting_id: meeting.id,
@@ -966,9 +971,11 @@ export async function processActiveMeeting(agent: AgentForMeeting): Promise<bool
 
   // Summarizing phase: another agent triggered summarization. Check for stuck timeout.
   if (meeting.status === 'summarizing') {
-    const summarizeStarted = meeting.concluded_at || meeting.started_at || meeting.created_at
+    // concluded_at is always NULL during summarizing, and started_at is when conversing began,
+    // not when summarizing started. Use 120s to account for normal conversation duration.
+    const summarizeStarted = meeting.started_at || meeting.created_at
     const stuckDuration = now - summarizeStarted
-    if (stuckDuration > 30) {
+    if (stuckDuration > 120) {
       logger.warn({ meetingId: meeting.id, stuckDuration }, 'Meeting stuck in summarizing, force-concluding')
       writeTransaction(db, (tx) => {
         tx.prepare(`
@@ -1118,7 +1125,7 @@ export function listMeetings(
     params.push(status)
   }
 
-  if (projectId) {
+  if (projectId !== undefined && projectId !== null) {
     whereClause += ' AND m.project_id = ?'
     params.push(projectId)
   }

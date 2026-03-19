@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
-import { getSimulationEngine } from '@/lib/simulation-engine'
+import { getSimulationEngine, resetSimulationEngine } from '@/lib/simulation-engine'
 import { getDatabase } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
@@ -11,7 +11,13 @@ export async function POST(request: NextRequest) {
   try {
     const engine = getSimulationEngine()
     const status = engine.getStatus()
+
+    if (!status.running) {
+      return NextResponse.json({ status: 'not_running', tickCount: 0 })
+    }
+
     engine.stop()
+    resetSimulationEngine()
 
     const db = getDatabase()
     const sleepResult = db.prepare(

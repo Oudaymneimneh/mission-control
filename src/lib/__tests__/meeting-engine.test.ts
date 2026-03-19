@@ -577,7 +577,7 @@ describe('meeting-engine', () => {
       const db = createMockDb()
       vi.mocked(getDatabase).mockReturnValue(db as any)
 
-      const staleTime = Math.floor(Date.now() / 1000) - 60 // 60s ago
+      const staleTime = Math.floor(Date.now() / 1000) - 150 // 150s ago (threshold is 120s)
       db._when('SELECT * FROM agent_meetings', {
         get: vi.fn().mockReturnValue({
           id: 5, workspace_id: 1, initiator_id: 1, participant_id: 2,
@@ -741,8 +741,10 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      // Phase 1 tx: transition to summarizing + read messages + initiator
-      db._when("SET status = ?", { run: vi.fn() })
+      // Atomic guard: check status and transition to summarizing
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
+      // Read messages + initiator
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -771,8 +773,9 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      // Phase 1 tx: transition to summarizing + empty messages
-      db._when("SET status = ?", { run: vi.fn() })
+      // Atomic guard: check status and transition to summarizing
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', { all: vi.fn().mockReturnValue([]) })
       db._when('agents WHERE id', { get: vi.fn().mockReturnValue(agentA) })
       // Fast-conclude tx
@@ -794,7 +797,8 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -826,7 +830,8 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -854,7 +859,8 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -885,8 +891,9 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: 3600000, created_at: 100, quality_score: null, project_id: null,
       }
 
-      // Phase 1 tx: transition to summarizing + read messages + initiator
-      db._when("SET status = ?", { run: vi.fn() })
+      // Atomic guard: check status and transition to summarizing
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -1167,7 +1174,8 @@ describe('meeting-engine', () => {
       })
 
       // summarizeMeeting stubs
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -1411,8 +1419,10 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
+      // Atomic guard: check status and transition to summarizing
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
       const statusRunMock = vi.fn()
-      db._when("SET status = ?", { run: statusRunMock })
+      db._when("SET status = 'summarizing'", { run: statusRunMock })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -1427,8 +1437,8 @@ describe('meeting-engine', () => {
 
       await summarizeMeeting(db as any, meeting)
 
-      // Phase 1: transitions to 'summarizing'
-      expect(statusRunMock).toHaveBeenCalledWith('summarizing', meeting.id)
+      // Atomic guard: transitions to 'summarizing'
+      expect(statusRunMock).toHaveBeenCalledWith(meeting.id)
       // Phase 3: transitions to 'concluded'
       expect(concludeRunMock).toHaveBeenCalled()
     })
@@ -1609,7 +1619,8 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },
@@ -1637,7 +1648,8 @@ describe('meeting-engine', () => {
         started_at: 100, concluded_at: null, scheduled_for: null, recurring_interval_ms: null, created_at: 100, quality_score: null, project_id: null,
       }
 
-      db._when("SET status = ?", { run: vi.fn() })
+      db._when('SELECT status FROM agent_meetings WHERE id', { get: vi.fn().mockReturnValue({ status: 'conversing' }) })
+      db._when("SET status = 'summarizing'", { run: vi.fn() })
       db._when('meeting_messages mm', {
         all: vi.fn().mockReturnValue([
           { content: 'Hello', agent_name: 'Atlas' },

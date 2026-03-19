@@ -342,14 +342,20 @@ export function SoulTab({
   const [editing, setEditing] = useState(false)
   const [content, setContent] = useState(soulContent)
   const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     setContent(soulContent)
   }, [soulContent])
 
   const handleSave = async () => {
-    await onSave(content)
-    setEditing(false)
+    setSaveError(null)
+    try {
+      await onSave(content)
+      setEditing(false)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save')
+    }
   }
 
   const handleLoadTemplate = async (templateName: string) => {
@@ -444,6 +450,7 @@ export function SoulTab({
           >
             {t('saveSoul')}
           </Button>
+          {saveError && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.25rem' }}>{saveError}</p>}
           <Button
             onClick={() => {
               setEditing(false)

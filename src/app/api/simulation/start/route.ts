@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const engine = getSimulationEngine(config)
+    const engine = getSimulationEngine({ ...config, workspaceId: auth.user.workspace_id })
     engine.start()
 
     const db = getDatabase()

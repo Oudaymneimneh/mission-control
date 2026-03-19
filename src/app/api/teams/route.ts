@@ -183,9 +183,9 @@ export async function PUT(request: NextRequest) {
       SELECT t.*, COUNT(tm.agent_id) as member_count
       FROM teams t
       LEFT JOIN team_members tm ON tm.team_id = t.id
-      WHERE t.id = ?
+      WHERE t.id = ? AND t.workspace_id = ?
       GROUP BY t.id
-    `).get(id) as TeamRow
+    `).get(id, workspaceId) as TeamRow
 
     return NextResponse.json({ team })
   } catch (err: unknown) {

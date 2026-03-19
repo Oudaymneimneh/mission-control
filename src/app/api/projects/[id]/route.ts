@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDatabase } from '@/lib/db'
+import { getDatabase, writeTransaction } from '@/lib/db'
 import { requireRole } from '@/lib/auth'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
@@ -268,16 +268,15 @@ export async function DELETE(
     `).get(workspaceId) as { id: number } | undefined
     if (!fallback) return NextResponse.json({ error: 'Default project missing' }, { status: 500 })
 
-    const tx = db.transaction(() => {
-      db.prepare(`
+    writeTransaction(db, (tx) => {
+      tx.prepare(`
         UPDATE tasks
         SET project_id = ?
         WHERE workspace_id = ? AND project_id = ?
       `).run(fallback.id, workspaceId, projectId)
 
-      db.prepare(`DELETE FROM projects WHERE id = ? AND workspace_id = ?`).run(projectId, workspaceId)
+      tx.prepare(`DELETE FROM projects WHERE id = ? AND workspace_id = ?`).run(projectId, workspaceId)
     })
-    tx()
 
     return NextResponse.json({ success: true, mode: 'delete' })
   } catch (error) {
